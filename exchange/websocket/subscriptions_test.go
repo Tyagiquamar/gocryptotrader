@@ -175,7 +175,7 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, 2, subscribeCalls)
 	})
 
-	t.Run("Concurrent recovery is serialized", func(t *testing.T) {
+	t.Run("Concurrent recovery is serialised", func(t *testing.T) {
 		m := NewManager()
 		require.NoError(t, m.Setup(newDefaultSetup()))
 		sub := &subscription.Subscription{Channel: "serializedResubTest"}
