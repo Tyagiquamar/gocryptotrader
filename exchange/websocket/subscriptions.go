@@ -115,7 +115,7 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 	if err := setResubscribingState(l); err != nil {
 		return fmt.Errorf("%w: %s", err, s)
 	}
-	if err := m.unsubscribeForResubscribe(ctx, conn, m.subscriptionStore(conn), l); err != nil {
+	if err := m.UnsubscribeChannels(ctx, conn, l); err != nil {
 		return err
 	}
 	return m.SubscribeToChannels(ctx, conn, l)
@@ -131,22 +131,6 @@ func setResubscribingState(subs subscription.List) error {
 		}
 	}
 	return nil
-}
-
-func (m *Manager) unsubscribeForResubscribe(ctx context.Context, conn Connection, store *subscription.Store, subs subscription.List) error {
-	if store == nil {
-		return fmt.Errorf("%w: subscription store", common.ErrNilPointer)
-	}
-	if missing := store.Missing(subs); len(missing) > 0 {
-		return fmt.Errorf("%w: %w: %q", ErrSubscriptionsNotRemoved, subscription.ErrNotFound, missing)
-	}
-	if ws, ok := m.managedWebsocket(conn); ok {
-		return ws.setup.Unsubscriber(ctx, conn, subs)
-	}
-	if m.Unsubscriber == nil {
-		return fmt.Errorf("%w: Global Unsubscriber not set", common.ErrNilPointer)
-	}
-	return m.Unsubscriber(subs)
 }
 
 // SubscribeToChannels subscribes to websocket channels using the exchange specific Subscriber method
@@ -617,8 +601,12 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 	if err := setResubscribingState(subs); err != nil {
 		return err
 	}
-	if err := m.unsubscribeForResubscribe(ctx, conn, conn.Subscriptions(), subs); err != nil {
+	missing, err := m.unsubscribeFromConnection(ctx, conn, subs)
+	if err != nil {
 		return err
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, missing)
 	}
 	remaining, err := m.subscribeToConnection(ctx, conn, subs)
 	if err != nil {
@@ -657,6 +645,9 @@ func (m *Manager) unsubscribeFromConnection(ctx context.Context, conn Connection
 
 	missing := store.Missing(subs)
 	for _, r := range remove {
+		if r.State() == subscription.ResubscribingState {
+			continue
+		}
 		if err := store.Remove(r); err != nil {
 			return nil, err
 		}

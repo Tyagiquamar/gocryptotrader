@@ -228,21 +228,9 @@ func TestResubscribe(t *testing.T) {
 	})
 }
 
-func TestUnsubscribeForResubscribeErrors(t *testing.T) {
+func TestAllSubscriptionsState(t *testing.T) {
 	t.Parallel()
-	m := NewManager()
 	sub := &subscription.Subscription{Channel: "sub"}
-
-	err := m.unsubscribeForResubscribe(t.Context(), nil, nil, subscription.List{sub})
-	assert.ErrorIs(t, err, common.ErrNilPointer)
-
-	store := subscription.NewStore()
-	err = m.unsubscribeForResubscribe(t.Context(), nil, store, subscription.List{sub})
-	assert.ErrorIs(t, err, ErrSubscriptionsNotRemoved)
-
-	require.NoError(t, store.Add(sub))
-	err = m.unsubscribeForResubscribe(t.Context(), nil, store, subscription.List{sub})
-	assert.ErrorIs(t, err, common.ErrNilPointer)
 	assert.True(t, allSubscriptionsState(subscription.List{sub}, subscription.InactiveState))
 	assert.False(t, allSubscriptionsState(subscription.List{sub}, subscription.SubscribedState))
 }
@@ -1789,6 +1777,7 @@ func TestResubscribeFromConnection(t *testing.T) {
 		sub := &subscription.Subscription{Channel: "sub"}
 		require.NoError(t, m.subscriptions.Add(sub), "subscription must be added to the manager store")
 		conn := &connection{subscriptions: subscription.NewStore()}
+		m.Unsubscriber = func(subscription.List) error { return nil }
 		subscriberCalled := false
 		m.Subscriber = func(subscription.List) error {
 			subscriberCalled = true
