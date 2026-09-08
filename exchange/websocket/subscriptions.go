@@ -99,17 +99,48 @@ func (m *Manager) initSubscriptionStore(conn Connection) *subscription.Store {
 }
 
 // ResubscribeToChannel resubscribes to channel
-// Sets state to Resubscribing, and exchanges which want to maintain a lock on it can respect this state and not RemoveSubscription
-// Errors if subscription is already subscribing
+// Sets state to Resubscribing, and exchanges which want to maintain a lock on it can respect this state and not RemoveSubscription.
+// A subscription already in ResubscribingState is retried.
 func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *subscription.Subscription) error {
+	m.m.Lock()
+	defer m.m.Unlock()
+
 	l := subscription.List{s}
-	if err := s.SetState(subscription.ResubscribingState); err != nil {
+	if err := setResubscribingState(l); err != nil {
 		return fmt.Errorf("%w: %s", err, s)
 	}
-	if err := m.UnsubscribeChannels(ctx, conn, l); err != nil {
+	if err := m.unsubscribeForResubscribe(ctx, conn, m.subscriptionStore(conn), l); err != nil {
 		return err
 	}
 	return m.SubscribeToChannels(ctx, conn, l)
+}
+
+func setResubscribingState(subs subscription.List) error {
+	for _, sub := range subs {
+		if sub.State() == subscription.ResubscribingState {
+			continue
+		}
+		if err := sub.SetState(subscription.ResubscribingState); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) unsubscribeForResubscribe(ctx context.Context, conn Connection, store *subscription.Store, subs subscription.List) error {
+	if store == nil {
+		return fmt.Errorf("%w: subscription store", common.ErrNilPointer)
+	}
+	if missing := store.Missing(subs); len(missing) > 0 {
+		return fmt.Errorf("%w: %w: %q", ErrSubscriptionsNotRemoved, subscription.ErrNotFound, missing)
+	}
+	if ws, ok := m.managedWebsocket(conn); ok {
+		return ws.setup.Unsubscriber(ctx, conn, subs)
+	}
+	if m.Unsubscriber == nil {
+		return fmt.Errorf("%w: Global Unsubscriber not set", common.ErrNilPointer)
+	}
+	return m.Unsubscriber(subs)
 }
 
 // SubscribeToChannels subscribes to websocket channels using the exchange specific Subscriber method
@@ -166,11 +197,14 @@ func (m *Manager) AddSuccessfulSubscriptions(conn Connection, subs ...*subscript
 
 	var errs error
 	for _, s := range subs {
+		alreadyTracked := subscriptionStore.Get(s) != nil && s.State() == subscription.ResubscribingState
 		if err := s.SetState(subscription.SubscribedState); err != nil {
 			errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
 		}
-		if err := subscriptionStore.Add(s); err != nil {
-			errs = common.AppendError(errs, err)
+		if !alreadyTracked {
+			if err := subscriptionStore.Add(s); err != nil {
+				errs = common.AppendError(errs, err)
+			}
 		}
 	}
 	return errs
@@ -189,6 +223,9 @@ func (m *Manager) RemoveSubscriptions(conn Connection, subs ...*subscription.Sub
 
 	var errs error
 	for _, s := range subs {
+		if s.State() == subscription.ResubscribingState {
+			continue
+		}
 		if err := s.SetState(subscription.UnsubscribedState); err != nil {
 			errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
 		}
@@ -553,18 +590,17 @@ func (m *Manager) scaleConnectionsToSubscriptions(ctx context.Context, ws *webso
 
 // ResubscribeFromConnection unsubscribes and resubscribes to a subscription on a connection
 func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection, subs subscription.List) error {
+	m.m.Lock()
+	defer m.m.Unlock()
+
 	if err := common.NilGuard(conn, subs); err != nil {
 		return err
 	}
-	if err := subs.SetStates(subscription.ResubscribingState); err != nil {
+	if err := setResubscribingState(subs); err != nil {
 		return err
 	}
-	missing, err := m.unsubscribeFromConnection(ctx, conn, subs)
-	if err != nil {
+	if err := m.unsubscribeForResubscribe(ctx, conn, conn.Subscriptions(), subs); err != nil {
 		return err
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, missing)
 	}
 	remaining, err := m.subscribeToConnection(ctx, conn, subs)
 	if err != nil {
@@ -608,7 +644,12 @@ func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, su
 		return nil, fmt.Errorf("websocket connection %w", err)
 	}
 
-	usedCap := store.Len()
+	usedCap := 0
+	for _, sub := range store.List() {
+		if sub.State() != subscription.ResubscribingState {
+			usedCap++
+		}
+	}
 	if m.MaxSubscriptionsPerConnection > 0 && usedCap >= m.MaxSubscriptionsPerConnection {
 		return subs, nil // No capacity left for this connection
 	}
@@ -623,11 +664,21 @@ func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, su
 	}
 
 	toSubscribe := subs[:availableCap]
+	tracked := make(map[*subscription.Subscription]bool, len(toSubscribe))
+	for _, s := range toSubscribe {
+		tracked[s] = store.Get(s) != nil && s.State() == subscription.ResubscribingState
+	}
 	if err := m.SubscribeToChannels(ctx, conn, toSubscribe); err != nil {
 		return nil, err
 	}
 
 	for _, s := range toSubscribe {
+		if tracked[s] {
+			continue
+		}
+		if store.Get(s) != nil {
+			return nil, fmt.Errorf("%w: %s", subscription.ErrDuplicate, s)
+		}
 		if err := store.Add(s); err != nil {
 			return nil, err
 		}

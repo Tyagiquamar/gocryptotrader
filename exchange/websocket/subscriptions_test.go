@@ -150,6 +150,84 @@ func TestResubscribe(t *testing.T) {
 	assert.ErrorIs(t, ws.ResubscribeToChannel(t.Context(), nil, channel[0]), subscription.ErrNotFound, "Resubscribe should error when channel isn't subscribed yet")
 	assert.NoError(t, ws.SubscribeToChannels(t.Context(), nil, channel), "Subscribe should not error")
 	assert.NoError(t, ws.ResubscribeToChannel(t.Context(), nil, channel[0]), "Resubscribe should not error now the channel is subscribed")
+
+	t.Run("Retry after transient subscribe failure", func(t *testing.T) {
+		t.Parallel()
+		m := NewManager()
+		require.NoError(t, m.Setup(newDefaultSetup()))
+		sub := &subscription.Subscription{Channel: "retryResubTest"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+		m.Unsubscriber = func(subs subscription.List) error { return m.RemoveSubscriptions(nil, subs...) }
+		subscribeCalls := 0
+		m.Subscriber = func(subs subscription.List) error {
+			subscribeCalls++
+			if subscribeCalls == 1 {
+				return errDastardlyReason
+			}
+			return m.AddSuccessfulSubscriptions(nil, subs...)
+		}
+
+		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, sub), errDastardlyReason)
+		require.Same(t, sub, m.GetSubscription(sub))
+		require.Equal(t, subscription.ResubscribingState, sub.State())
+		require.NoError(t, m.ResubscribeToChannel(t.Context(), nil, sub))
+		require.Equal(t, subscription.SubscribedState, sub.State())
+		require.Equal(t, 2, subscribeCalls)
+	})
+
+	t.Run("Concurrent recovery is serialized", func(t *testing.T) {
+		m := NewManager()
+		require.NoError(t, m.Setup(newDefaultSetup()))
+		sub := &subscription.Subscription{Channel: "serializedResubTest"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+		firstUnsubscribe := make(chan struct{})
+		secondUnsubscribe := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		unsubscribes := 0
+		m.Unsubscriber = func(subscription.List) error {
+			unsubscribes++
+			switch unsubscribes {
+			case 1:
+				close(firstUnsubscribe)
+				<-releaseFirst
+			case 2:
+				close(secondUnsubscribe)
+			}
+			return nil
+		}
+		m.Subscriber = func(subs subscription.List) error {
+			if unsubscribes == 1 {
+				return errDastardlyReason
+			}
+			return m.AddSuccessfulSubscriptions(nil, subs...)
+		}
+
+		var firstErr, secondErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			firstErr = m.ResubscribeToChannel(t.Context(), nil, sub)
+		}()
+		<-firstUnsubscribe
+		secondReady := make(chan struct{})
+		go func() {
+			defer wg.Done()
+			close(secondReady)
+			secondErr = m.ResubscribeToChannel(t.Context(), nil, sub)
+		}()
+		<-secondReady
+		select {
+		case <-secondUnsubscribe:
+			t.Fatal("second recovery started before the first completed")
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(releaseFirst)
+		wg.Wait()
+
+		require.ErrorIs(t, firstErr, errDastardlyReason)
+		require.NoError(t, secondErr)
+	})
 }
 
 // TestSubscriptions tests adding, getting and removing subscriptions
@@ -1625,7 +1703,7 @@ func TestResubscribeFromConnection(t *testing.T) {
 		conn := &connection{subscriptions: store}
 
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub1})
-		require.ErrorIs(t, err, subscription.ErrInStateAlready, "must error when subscription is not in unsubscribed state")
+		require.NoError(t, err, "an interrupted recovery must be retryable")
 	})
 	t.Run("Bad unsub", func(t *testing.T) {
 		t.Parallel()
@@ -1656,6 +1734,28 @@ func TestResubscribeFromConnection(t *testing.T) {
 
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub1})
 		require.ErrorIs(t, err, errAlreadyConnected, "must error")
+	})
+	t.Run("Retry after transient subscribe failure", func(t *testing.T) {
+		t.Parallel()
+		m := NewManager()
+		m.subscriptions = subscription.NewStore()
+		sub := &subscription.Subscription{Channel: "sub"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+		conn := &connection{subscriptions: m.subscriptions}
+		m.Unsubscriber = func(subscription.List) error { return nil }
+		subscribeCalls := 0
+		m.Subscriber = func(subscription.List) error {
+			subscribeCalls++
+			if subscribeCalls == 1 {
+				return errAlreadyConnected
+			}
+			return m.AddSuccessfulSubscriptions(nil, sub)
+		}
+
+		require.ErrorIs(t, m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub}), errAlreadyConnected)
+		require.NoError(t, m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub}), "a transient subscribe failure must remain retryable")
+		require.Equal(t, 2, subscribeCalls)
+		require.Same(t, sub, m.GetSubscription(sub))
 	})
 	t.Run("Missing connection subscription", func(t *testing.T) {
 		t.Parallel()
