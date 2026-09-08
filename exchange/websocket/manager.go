@@ -98,6 +98,9 @@ type Manager struct {
 	connectionManagerMu           sync.RWMutex
 	connections                   map[Connection]*websocket
 	subscriptions                 *subscription.Store
+	resubscriptionsMu             sync.Mutex
+	resubscriptions               map[*subscription.Subscription]struct{}
+	resubscribePreLockHook        func(*subscription.Subscription)
 	connector                     func() error
 	rateLimitDefinitions          request.RateLimitDefinitions // rate limiters shared between Websocket and REST connections
 	Subscriber                    func(subscription.List) error
@@ -189,6 +192,7 @@ func NewManager() *Manager {
 		features:          &protocol.Features{},
 		Orderbook:         buffer.Orderbook{},
 		connections:       make(map[Connection]*websocket),
+		resubscriptions:   make(map[*subscription.Subscription]struct{}),
 	}
 }
 

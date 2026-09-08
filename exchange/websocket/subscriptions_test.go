@@ -207,24 +207,212 @@ func TestResubscribe(t *testing.T) {
 			firstErr = m.ResubscribeToChannel(t.Context(), nil, sub)
 		}()
 		<-firstUnsubscribe
-		secondReady := make(chan struct{})
+		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+			if s == sub {
+				close(secondUnsubscribe)
+			}
+		}
 		go func() {
 			defer wg.Done()
-			close(secondReady)
 			secondErr = m.ResubscribeToChannel(t.Context(), nil, sub)
 		}()
-		<-secondReady
-		select {
-		case <-secondUnsubscribe:
-			t.Fatal("second recovery started before the first completed")
-		case <-time.After(100 * time.Millisecond):
-		}
+		<-secondUnsubscribe
 		close(releaseFirst)
 		wg.Wait()
 
 		require.NoError(t, firstErr)
 		require.NoError(t, secondErr)
 		require.Equal(t, 1, unsubscribes)
+		require.Equal(t, subscription.SubscribedState, sub.State())
+	})
+
+	t.Run("Different subscriptions recover concurrently", func(t *testing.T) {
+		m := NewManager()
+		require.NoError(t, m.Setup(newDefaultSetup()))
+		subA := &subscription.Subscription{Channel: "subA"}
+		subB := &subscription.Subscription{Channel: "subB"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, subA, subB))
+
+		var unsubsMu sync.Mutex
+		unsubscribed := make(map[string]int)
+		subscribed := make(map[string]int)
+
+		subAUnsubStarted := make(chan struct{})
+		releaseSubA := make(chan struct{})
+
+		m.Unsubscriber = func(subs subscription.List) error {
+			unsubsMu.Lock()
+			for _, s := range subs {
+				unsubscribed[s.Channel]++
+			}
+			unsubsMu.Unlock()
+			for _, s := range subs {
+				if s.Channel == "subA" {
+					close(subAUnsubStarted)
+					<-releaseSubA
+				}
+			}
+			return nil
+		}
+		m.Subscriber = func(subs subscription.List) error {
+			unsubsMu.Lock()
+			for _, s := range subs {
+				subscribed[s.Channel]++
+			}
+			unsubsMu.Unlock()
+			return m.AddSuccessfulSubscriptions(nil, subs...)
+		}
+
+		var wg sync.WaitGroup
+		var errA, errB error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			errA = m.ResubscribeToChannel(t.Context(), nil, subA)
+		}()
+		<-subAUnsubStarted
+		subBPreLock := make(chan struct{})
+		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+			if s == subB {
+				close(subBPreLock)
+			}
+		}
+		go func() {
+			defer wg.Done()
+			errB = m.ResubscribeToChannel(t.Context(), nil, subB)
+		}()
+		<-subBPreLock
+		close(releaseSubA)
+		wg.Wait()
+
+		require.NoError(t, errA)
+		require.NoError(t, errB)
+		require.Equal(t, 1, unsubscribed["subA"])
+		require.Equal(t, 1, unsubscribed["subB"])
+		require.Equal(t, 1, subscribed["subA"])
+		require.Equal(t, 1, subscribed["subB"])
+		require.Equal(t, subscription.SubscribedState, subA.State())
+		require.Equal(t, subscription.SubscribedState, subB.State())
+	})
+
+	t.Run("Unrelated manager-lock contention does not drop recovery", func(t *testing.T) {
+		m := NewManager()
+		require.NoError(t, m.Setup(newDefaultSetup()))
+		sub := &subscription.Subscription{Channel: "unrelatedContentionTest"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+
+		unsubCalls := 0
+		subCalls := 0
+		m.Unsubscriber = func(subscription.List) error {
+			unsubCalls++
+			return nil
+		}
+		m.Subscriber = func(subs subscription.List) error {
+			subCalls++
+			return m.AddSuccessfulSubscriptions(nil, subs...)
+		}
+
+		m.m.Lock()
+		recovered := make(chan error, 1)
+		preLockReached := make(chan struct{})
+		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+			if s == sub {
+				close(preLockReached)
+			}
+		}
+
+		go func() {
+			recovered <- m.ResubscribeToChannel(t.Context(), nil, sub)
+		}()
+
+		<-preLockReached
+		require.Equal(t, 0, unsubCalls)
+		require.Equal(t, 0, subCalls)
+
+		m.m.Unlock()
+		err := <-recovered
+		require.NoError(t, err)
+		require.Equal(t, 1, unsubCalls)
+		require.Equal(t, 1, subCalls)
+		require.Equal(t, subscription.SubscribedState, sub.State())
+	})
+
+	t.Run("Bitfinex temporary key cleanup pattern during recovery", func(t *testing.T) {
+		m := NewManager()
+		require.NoError(t, m.Setup(newDefaultSetup()))
+		realSub := &subscription.Subscription{Key: 42, Channel: "bitfinexPatternTest"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, realSub))
+
+		m.Unsubscriber = func(subs subscription.List) error {
+			return m.RemoveSubscriptions(nil, subs...)
+		}
+		recoveries := 0
+		m.Subscriber = func(subs subscription.List) error {
+			recoveries++
+			s := subs[0]
+			tempKey := fmt.Sprintf("subId-%d", recoveries)
+			s.Key = tempKey
+			if err := m.AddSubscriptions(nil, s); err != nil {
+				return err
+			}
+			defer func() {
+				_ = m.RemoveSubscriptions(nil, s)
+			}()
+
+			newSub := s.Clone()
+			newSub.Key = 42 + recoveries
+			return m.AddSuccessfulSubscriptions(nil, newSub)
+		}
+
+		// 1st recovery
+		require.NoError(t, m.ResubscribeToChannel(t.Context(), nil, realSub))
+		subs := m.GetSubscriptions()
+		require.Len(t, subs, 1, "store must only have 1 subscription after 1st recovery")
+		chanID, ok := subs[0].Key.(int)
+		require.True(t, ok, "key must be an int, not temporary string subId")
+		require.Equal(t, 43, chanID)
+
+		// 2nd recovery
+		currentSub := subs[0]
+		require.NoError(t, m.ResubscribeToChannel(t.Context(), nil, currentSub))
+		subs = m.GetSubscriptions()
+		require.Len(t, subs, 1, "store must only have 1 subscription after 2nd recovery")
+		chanID, ok = subs[0].Key.(int)
+		require.True(t, ok, "key must be an int, not temporary string subId")
+		require.Equal(t, 44, chanID)
+
+		// Unsubscribe all
+		require.NoError(t, m.RemoveSubscriptions(nil, subs...))
+		require.Empty(t, m.GetSubscriptions())
+	})
+
+	t.Run("Failed recovery followed by FlushChannels", func(t *testing.T) {
+		m := NewManager()
+		require.NoError(t, m.Setup(newDefaultSetup()))
+		m.features.Subscribe = true
+		m.features.Unsubscribe = true
+		m.state.Store(connectedState)
+		m.enabled.Store(true)
+
+		sub := &subscription.Subscription{Channel: "flushAfterFailTest"}
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+		m.Unsubscriber = func(subs subscription.List) error {
+			return m.RemoveSubscriptions(nil, subs...)
+		}
+		m.Subscriber = func(subs subscription.List) error {
+			return errDastardlyReason
+		}
+
+		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, sub), errDastardlyReason)
+		require.Equal(t, subscription.ResubscribingState, sub.State())
+		require.Same(t, sub, m.GetSubscription(sub))
+
+		m.GenerateSubs = func() (subscription.List, error) {
+			return subscription.List{}, nil
+		}
+		require.NoError(t, m.FlushChannels(t.Context()))
+		require.Nil(t, m.GetSubscription(sub))
+		require.Equal(t, subscription.UnsubscribedState, sub.State())
 	})
 }
 
@@ -350,6 +538,25 @@ func TestCheckSubscriptions(t *testing.T) {
 	require.NoError(t, ws.AddSuccessfulSubscriptions(conn, retained))
 	require.NoError(t, retained.SetState(subscription.ResubscribingState))
 	require.NoError(t, ws.checkSubscriptions(conn, subscription.List{retained}))
+
+	ws.MaxSubscriptionsPerConnection = 2
+	capConn := &connection{subscriptions: subscription.NewStore()}
+	ws.connections[capConn] = &websocket{
+		subscriptions: capConn.Subscriptions(),
+		connections:   []Connection{capConn},
+	}
+	sub1 := &subscription.Subscription{Key: 101, Channel: "capSub1"}
+	sub2 := &subscription.Subscription{Key: 102, Channel: "capSub2"}
+	require.NoError(t, ws.AddSuccessfulSubscriptions(capConn, sub1, sub2))
+
+	// Full connection (2/2). Recovering existing sub1 in ResubscribingState must succeed:
+	require.NoError(t, sub1.SetState(subscription.ResubscribingState))
+	require.NoError(t, ws.checkSubscriptions(capConn, subscription.List{sub1}))
+
+	// Unrelated incoming subscription must be rejected:
+	unrelated := &subscription.Subscription{Key: 103, Channel: "unrelated"}
+	err = ws.checkSubscriptions(capConn, subscription.List{unrelated})
+	require.ErrorIs(t, err, errSubscriptionsExceedsLimit)
 }
 
 func TestUpdateChannelSubscriptions(t *testing.T) {
@@ -1811,6 +2018,57 @@ func TestResubscribeFromConnection(t *testing.T) {
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub})
 		require.ErrorIs(t, err, ErrSubscriptionsNotAdded, "must error when connection capacity is consumed during resubscription")
 		assert.False(t, subscriberCalled, "subscriber should not be called when the connection has no capacity")
+	})
+	t.Run("Concurrent recovery coalesced", func(t *testing.T) {
+		m := NewManager()
+		connStore := subscription.NewStore()
+		sub := &subscription.Subscription{Channel: "connCoalesce"}
+		require.NoError(t, connStore.Add(sub))
+		require.NoError(t, sub.SetState(subscription.SubscribedState))
+		m.subscriptions = connStore
+		conn := &connection{subscriptions: connStore}
+
+		firstUnsub := make(chan struct{})
+		secondPreLock := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		unsubCalls := 0
+		m.Unsubscriber = func(subscription.List) error {
+			unsubCalls++
+			if unsubCalls == 1 {
+				close(firstUnsub)
+				<-releaseFirst
+			}
+			return nil
+		}
+		m.Subscriber = func(subs subscription.List) error {
+			return m.AddSuccessfulSubscriptions(conn, subs...)
+		}
+
+		var firstErr, secondErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			firstErr = m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub})
+		}()
+		<-firstUnsub
+		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+			if s == sub {
+				close(secondPreLock)
+			}
+		}
+		go func() {
+			defer wg.Done()
+			secondErr = m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub})
+		}()
+		<-secondPreLock
+		close(releaseFirst)
+		wg.Wait()
+
+		require.NoError(t, firstErr)
+		require.NoError(t, secondErr)
+		require.Equal(t, 1, unsubCalls)
+		require.Equal(t, subscription.SubscribedState, sub.State())
 	})
 }
 
