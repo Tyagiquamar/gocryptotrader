@@ -196,9 +196,6 @@ func TestResubscribe(t *testing.T) {
 			return nil
 		}
 		m.Subscriber = func(subs subscription.List) error {
-			if unsubscribes == 1 {
-				return errDastardlyReason
-			}
 			return m.AddSuccessfulSubscriptions(nil, subs...)
 		}
 
@@ -225,8 +222,9 @@ func TestResubscribe(t *testing.T) {
 		close(releaseFirst)
 		wg.Wait()
 
-		require.ErrorIs(t, firstErr, errDastardlyReason)
+		require.NoError(t, firstErr)
 		require.NoError(t, secondErr)
+		require.Equal(t, 1, unsubscribes)
 	})
 }
 
@@ -337,6 +335,14 @@ func TestCheckSubscriptions(t *testing.T) {
 	}
 	err = ws.checkSubscriptions(conn, subscription.List{{}})
 	assert.ErrorContains(t, err, "nil pointer: Websocket.subscriptions", "nil store for a specific connection should error correctly")
+
+	ws.MaxSubscriptionsPerConnection = 1
+	conn = &connection{subscriptions: subscription.NewStore()}
+	ws.connections[conn] = &websocket{subscriptions: conn.Subscriptions(), connections: []Connection{conn}}
+	retained := &subscription.Subscription{Key: 43, Channel: "retained"}
+	require.NoError(t, ws.AddSuccessfulSubscriptions(conn, retained))
+	require.NoError(t, retained.SetState(subscription.ResubscribingState))
+	require.NoError(t, ws.checkSubscriptions(conn, subscription.List{retained}))
 }
 
 func TestUpdateChannelSubscriptions(t *testing.T) {

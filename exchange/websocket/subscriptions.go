@@ -102,7 +102,13 @@ func (m *Manager) initSubscriptionStore(conn Connection) *subscription.Store {
 // Sets state to Resubscribing, and exchanges which want to maintain a lock on it can respect this state and not RemoveSubscription.
 // A subscription already in ResubscribingState is retried.
 func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *subscription.Subscription) error {
-	m.m.Lock()
+	if !m.m.TryLock() {
+		m.m.Lock()
+		if s.State() == subscription.SubscribedState {
+			m.m.Unlock()
+			return nil
+		}
+	}
 	defer m.m.Unlock()
 
 	l := subscription.List{s}
@@ -310,7 +316,13 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 		usedCapacity = subscriptionStore.Len()
 	}
 
-	if m.MaxSubscriptionsPerConnection > 0 && usedCapacity+len(subs) > m.MaxSubscriptionsPerConnection {
+	retained := 0
+	for _, s := range subs {
+		if s.State() == subscription.ResubscribingState && subscriptionStore.Get(s) != nil {
+			retained++
+		}
+	}
+	if m.MaxSubscriptionsPerConnection > 0 && usedCapacity-retained+len(subs) > m.MaxSubscriptionsPerConnection {
 		return fmt.Errorf("%w: current subscriptions: %v, incoming subscriptions: %v, max subscriptions per connection: %v",
 			errSubscriptionsExceedsLimit,
 			usedCapacity,
@@ -590,7 +602,13 @@ func (m *Manager) scaleConnectionsToSubscriptions(ctx context.Context, ws *webso
 
 // ResubscribeFromConnection unsubscribes and resubscribes to a subscription on a connection
 func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection, subs subscription.List) error {
-	m.m.Lock()
+	if !m.m.TryLock() {
+		m.m.Lock()
+		if allSubscriptionsState(subs, subscription.SubscribedState) {
+			m.m.Unlock()
+			return nil
+		}
+	}
 	defer m.m.Unlock()
 
 	if err := common.NilGuard(conn, subs); err != nil {
@@ -610,6 +628,15 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 		return fmt.Errorf("%w: %q", ErrSubscriptionsNotAdded, remaining)
 	}
 	return nil
+}
+
+func allSubscriptionsState(subs subscription.List, state subscription.State) bool {
+	for _, sub := range subs {
+		if sub.State() != state {
+			return false
+		}
+	}
+	return true
 }
 
 // unsubscribeFromConnection unsubscribes for a connection and removes subscriptions from the connection's store
