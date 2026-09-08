@@ -316,13 +316,13 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 		usedCapacity = subscriptionStore.Len()
 	}
 
-	retained := 0
+	retained := make(map[*subscription.Subscription]struct{}, len(subs))
 	for _, s := range subs {
 		if s.State() == subscription.ResubscribingState && subscriptionStore.Get(s) != nil {
-			retained++
+			retained[s] = struct{}{}
 		}
 	}
-	if m.MaxSubscriptionsPerConnection > 0 && usedCapacity-retained+len(subs) > m.MaxSubscriptionsPerConnection {
+	if m.MaxSubscriptionsPerConnection > 0 && usedCapacity-len(retained)+len(subs) > m.MaxSubscriptionsPerConnection {
 		return fmt.Errorf("%w: current subscriptions: %v, incoming subscriptions: %v, max subscriptions per connection: %v",
 			errSubscriptionsExceedsLimit,
 			usedCapacity,
