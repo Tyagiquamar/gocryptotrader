@@ -13,6 +13,7 @@ import (
 	gws "github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/thrasher-corp/gocryptotrader/common"
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/subscription"
@@ -2203,7 +2204,6 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.Equal(t, 1, unsubCalls)
 		require.Equal(t, subscription.SubscribedState, sub.State())
 	})
-
 
 	t.Run("Connection capacity discount is per subscription pointer", func(t *testing.T) {
 		t.Parallel()
