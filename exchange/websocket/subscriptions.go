@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 
 	"github.com/thrasher-corp/gocryptotrader/common"
@@ -129,10 +130,12 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 	}
 
 	m.m.Lock()
-	defer m.m.Unlock()
-
 	if inFlight {
+		m.m.Unlock()
+		m.waitForResubscriptionLeader(s)
+		m.m.Lock()
 		if s.State() == subscription.SubscribedState {
+			m.m.Unlock()
 			return nil
 		}
 		m.resubscriptionsMu.Lock()
@@ -144,16 +147,15 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 			m.resubscriptionsMu.Unlock()
 		}()
 	}
+	defer m.m.Unlock()
 
 	l := subscription.List{s}
 	setResubscribingState(l)
 
 	store := m.subscriptionStore(conn)
-	var origSub *subscription.Subscription
 	var origKey any
 	if store != nil {
-		origSub = store.Get(s)
-		if origSub != nil {
+		if origSub := store.Get(s); origSub != nil {
 			origKey = origSub.Key
 		}
 	}
@@ -162,18 +164,81 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 		return err
 	}
 	if err := m.SubscribeToChannels(ctx, conn, l); err != nil {
-		if origSub != nil && store != nil {
-			if origKey != nil {
-				origSub.Key = origKey
-			}
-			if store.Get(origSub) == nil {
-				_ = store.Add(origSub)
-			}
-			_ = origSub.SetState(subscription.ResubscribingState)
-		}
+		restoreSubscriptionAfterFailedRecovery(store, s, origKey)
 		return err
 	}
 	return nil
+}
+
+type recoverySnapshot struct {
+	sub     *subscription.Subscription
+	origKey any
+}
+
+func (m *Manager) waitForResubscriptionLeader(s *subscription.Subscription) {
+	for {
+		m.resubscriptionsMu.Lock()
+		_, exists := m.resubscriptions[s]
+		m.resubscriptionsMu.Unlock()
+		if !exists {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+func connectionUsedCapacity(store *subscription.Store, incoming subscription.List) int {
+	if store == nil {
+		return 0
+	}
+	usedCap := store.Len()
+	for _, s := range incoming {
+		if s != nil && s.State() == subscription.ResubscribingState && store.Get(s) != nil {
+			usedCap--
+		}
+	}
+	return usedCap
+}
+
+func hasLiveRecoveryReplacement(store *subscription.Store, sub *subscription.Subscription, origKey any) bool {
+	if store == nil || sub == nil {
+		return false
+	}
+	for _, existing := range store.List() {
+		if existing == sub {
+			continue
+		}
+		if existing.Channel != sub.Channel {
+			continue
+		}
+		if existing.State() != subscription.SubscribedState {
+			continue
+		}
+		if origKey != nil && existing.Key == origKey {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func restoreSubscriptionAfterFailedRecovery(store *subscription.Store, sub *subscription.Subscription, origKey any) {
+	if store == nil || sub == nil {
+		return
+	}
+	if hasLiveRecoveryReplacement(store, sub, origKey) {
+		if store.Get(sub) != nil {
+			_ = sub.SetState(subscription.ResubscribingState)
+		}
+		return
+	}
+	if origKey != nil {
+		sub.SetKey(origKey)
+	}
+	_ = sub.SetState(subscription.ResubscribingState)
+	if store.Get(sub) == nil {
+		_ = store.Add(sub)
+	}
 }
 
 func setResubscribingState(subs subscription.List) {
@@ -346,18 +411,7 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 		connSubStore = subscriptionStore
 	}
 
-	incoming := make(map[*subscription.Subscription]struct{}, len(subs))
-	for _, s := range subs {
-		incoming[s] = struct{}{}
-	}
-
-	usedCap := 0
-	for _, sub := range connSubStore.List() {
-		if _, ok := incoming[sub]; ok && sub.State() == subscription.ResubscribingState {
-			continue // Retained for this recovery, so it is not consuming a new slot
-		}
-		usedCap++
-	}
+	usedCap := connectionUsedCapacity(connSubStore, subs)
 
 	if m.MaxSubscriptionsPerConnection > 0 && usedCap+len(subs) > m.MaxSubscriptionsPerConnection {
 		return fmt.Errorf("%w: current subscriptions: %v, incoming subscriptions: %v, max subscriptions per connection: %v",
@@ -679,10 +733,14 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 	}
 
 	m.m.Lock()
-	defer m.m.Unlock()
-
 	if allInFlight {
+		m.m.Unlock()
+		for _, s := range subs {
+			m.waitForResubscriptionLeader(s)
+		}
+		m.m.Lock()
 		if allSubscriptionsState(subs, subscription.SubscribedState) {
+			m.m.Unlock()
 			return nil
 		}
 		m.resubscriptionsMu.Lock()
@@ -698,6 +756,18 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 			m.resubscriptionsMu.Unlock()
 		}()
 	}
+	defer m.m.Unlock()
+
+	store := m.subscriptionStore(conn)
+	snapshots := make([]recoverySnapshot, len(subs))
+	for i, s := range subs {
+		snapshots[i] = recoverySnapshot{sub: s}
+		if store != nil {
+			if orig := store.Get(s); orig != nil {
+				snapshots[i].origKey = orig.Key
+			}
+		}
+	}
 
 	setResubscribingState(subs)
 	missing, err := m.unsubscribeFromConnection(ctx, conn, subs)
@@ -705,10 +775,21 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 		return err
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, missing)
+		var notRemoved subscription.List
+		for _, s := range missing {
+			if s.State() != subscription.UnsubscribedState {
+				notRemoved = append(notRemoved, s)
+			}
+		}
+		if len(notRemoved) > 0 {
+			return fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, notRemoved)
+		}
 	}
 	remaining, err := m.subscribeToConnection(ctx, conn, subs)
 	if err != nil {
+		for _, snap := range snapshots {
+			restoreSubscriptionAfterFailedRecovery(store, snap.sub, snap.origKey)
+		}
 		return err
 	}
 	if len(remaining) > 0 {
@@ -747,6 +828,9 @@ func (m *Manager) unsubscribeFromConnection(ctx context.Context, conn Connection
 		if r.State() == subscription.ResubscribingState {
 			continue
 		}
+		if store.Get(r) == nil {
+			continue
+		}
 		if err := store.Remove(r); err != nil {
 			return nil, err
 		}
@@ -761,18 +845,7 @@ func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, su
 		return nil, fmt.Errorf("websocket connection %w", err)
 	}
 
-	incoming := make(map[*subscription.Subscription]struct{}, len(subs))
-	for _, s := range subs {
-		incoming[s] = struct{}{}
-	}
-
-	usedCap := 0
-	for _, sub := range store.List() {
-		if _, ok := incoming[sub]; ok && sub.State() == subscription.ResubscribingState {
-			continue // Retained for this recovery, so it is not consuming a new slot
-		}
-		usedCap++
-	}
+	usedCap := connectionUsedCapacity(store, subs)
 	if m.MaxSubscriptionsPerConnection > 0 && usedCap >= m.MaxSubscriptionsPerConnection {
 		return subs, nil // No capacity left for this connection
 	}
@@ -796,6 +869,11 @@ func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, su
 	}
 
 	for _, s := range toSubscribe {
+		if s.State() != subscription.SubscribedState {
+			if err := s.SetState(subscription.SubscribedState); err != nil {
+				return nil, err
+			}
+		}
 		if tracked[s] {
 			continue
 		}
