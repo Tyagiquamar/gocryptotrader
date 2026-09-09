@@ -147,24 +147,27 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 			m.resubscriptionsMu.Unlock()
 		}()
 	}
-	defer m.m.Unlock()
 
 	l := subscription.List{s}
 	setResubscribingState(l)
 
-	store := m.subscriptionStore(conn)
+	wsStore := m.subscriptionStore(conn)
+	connStore := connectionSubscriptionStore(conn)
 	var origKey any
-	if store != nil {
-		if origSub := store.Get(s); origSub != nil {
+	if wsStore != nil {
+		if origSub := wsStore.Get(s); origSub != nil {
 			origKey = origSub.Key
 		}
 	}
+	m.m.Unlock()
 
 	if err := m.UnsubscribeChannels(ctx, conn, l); err != nil {
 		return err
 	}
 	if err := m.SubscribeToChannels(ctx, conn, l); err != nil {
-		restoreSubscriptionAfterFailedRecovery(store, s, origKey)
+		m.m.Lock()
+		restoreFailedRecovery(wsStore, connStore, s, origKey)
+		m.m.Unlock()
 		return err
 	}
 	return nil
@@ -173,6 +176,30 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 type recoverySnapshot struct {
 	sub     *subscription.Subscription
 	origKey any
+}
+
+func connectionSubscriptionStore(conn Connection) *subscription.Store {
+	if conn == nil {
+		return nil
+	}
+	return conn.Subscriptions()
+}
+
+func restoreFailedRecovery(wsStore, connStore *subscription.Store, sub *subscription.Subscription, origKey any) {
+	if sub == nil {
+		return
+	}
+	if connStore != nil {
+		restoreSubscriptionAfterFailedRecovery(connStore, sub, origKey)
+	}
+	if wsStore == nil || wsStore == connStore {
+		return
+	}
+	if wsStore.Get(sub) == nil {
+		restoreSubscriptionAfterFailedRecovery(wsStore, sub, origKey)
+		return
+	}
+	_ = sub.SetState(subscription.ResubscribingState)
 }
 
 func (m *Manager) waitForResubscriptionLeader(s *subscription.Subscription) {
@@ -192,10 +219,16 @@ func connectionUsedCapacity(store *subscription.Store, incoming subscription.Lis
 		return 0
 	}
 	usedCap := store.Len()
+	discounted := make(map[*subscription.Subscription]struct{}, len(incoming))
 	for _, s := range incoming {
-		if s != nil && s.State() == subscription.ResubscribingState && store.Get(s) != nil {
-			usedCap--
+		if s == nil || s.State() != subscription.ResubscribingState || store.Get(s) == nil {
+			continue
 		}
+		if _, seen := discounted[s]; seen {
+			continue
+		}
+		discounted[s] = struct{}{}
+		usedCap--
 	}
 	return usedCap
 }
@@ -204,17 +237,18 @@ func hasLiveRecoveryReplacement(store *subscription.Store, sub *subscription.Sub
 	if store == nil || sub == nil {
 		return false
 	}
+	want := subscription.ExactKey{Subscription: sub}
 	for _, existing := range store.List() {
 		if existing == sub {
 			continue
 		}
-		if existing.Channel != sub.Channel {
+		if !want.Match(subscription.ExactKey{Subscription: existing}) {
 			continue
 		}
 		if existing.State() != subscription.SubscribedState {
 			continue
 		}
-		if origKey != nil && existing.Key == origKey {
+		if origKey != nil && existing.EnsureKeyed() == origKey {
 			continue
 		}
 		return true
@@ -756,20 +790,26 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 			m.resubscriptionsMu.Unlock()
 		}()
 	}
-	defer m.m.Unlock()
 
-	store := m.subscriptionStore(conn)
+	wsStore := m.subscriptionStore(conn)
+	connStore := connectionSubscriptionStore(conn)
 	snapshots := make([]recoverySnapshot, len(subs))
 	for i, s := range subs {
 		snapshots[i] = recoverySnapshot{sub: s}
-		if store != nil {
-			if orig := store.Get(s); orig != nil {
+		if connStore != nil {
+			if orig := connStore.Get(s); orig != nil {
+				snapshots[i].origKey = orig.Key
+			}
+		} else if wsStore != nil {
+			if orig := wsStore.Get(s); orig != nil {
 				snapshots[i].origKey = orig.Key
 			}
 		}
 	}
 
 	setResubscribingState(subs)
+	m.m.Unlock()
+
 	missing, err := m.unsubscribeFromConnection(ctx, conn, subs)
 	if err != nil {
 		return err
@@ -787,9 +827,14 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 	}
 	remaining, err := m.subscribeToConnection(ctx, conn, subs)
 	if err != nil {
+		m.m.Lock()
 		for _, snap := range snapshots {
-			restoreSubscriptionAfterFailedRecovery(store, snap.sub, snap.origKey)
+			if snap.sub.State() == subscription.SubscribedState {
+				continue
+			}
+			restoreFailedRecovery(wsStore, connStore, snap.sub, snap.origKey)
 		}
+		m.m.Unlock()
 		return err
 	}
 	if len(remaining) > 0 {

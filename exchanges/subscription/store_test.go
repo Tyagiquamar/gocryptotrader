@@ -174,6 +174,18 @@ func TestStoreDiff(t *testing.T) {
 	assert.Equal(t, MyTradesChannel, subs[0].Channel, "Should get correct channels in sub")
 	require.Equal(t, 2, len(unsubs), "Should get the correct number of unsubs")
 	EqualLists(t, unsubs, List{{Channel: OrderbookChannel}, {Channel: CandlesChannel}})
+
+	t.Run("ResubscribingState treated as needing subscribe", func(t *testing.T) {
+		t.Parallel()
+		s := NewStore()
+		resub := &Subscription{Channel: TickerChannel}
+		require.NoError(t, s.Add(resub))
+		require.NoError(t, resub.SetState(ResubscribingState))
+
+		added, removed := s.Diff(List{resub})
+		assert.Equal(t, List{resub}, added, "resubscribing entry should be treated as absent for subscribe diff")
+		assert.Empty(t, removed, "still-wanted resubscribing entry should not be removed")
+	})
 }
 
 func EqualLists(tb testing.TB, a, b List) {

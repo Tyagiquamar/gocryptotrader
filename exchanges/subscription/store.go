@@ -183,11 +183,15 @@ func (s *Store) Diff(compare List) (added, removed List) {
 	defer s.mu.RUnlock()
 	removedMap := maps.Clone(s.m)
 	for _, sub := range compare {
-		if found := s.get(sub); found != nil {
+		found := s.get(sub)
+		if found != nil {
+			if found.State() == ResubscribingState {
+				added = append(added, sub)
+			}
 			delete(removedMap, found.Key)
-		} else {
-			added = append(added, sub)
+			continue
 		}
+		added = append(added, sub)
 	}
 
 	for _, c := range removedMap {
