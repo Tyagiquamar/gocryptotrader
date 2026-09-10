@@ -12,7 +12,6 @@ import (
 )
 
 // Public subscription errors
-
 var (
 	ErrSubscriptionFailure = errors.New("subscription failure")
 
@@ -22,7 +21,6 @@ var (
 )
 
 // Public subscription errors
-
 var (
 	errSubscriptionsExceedsLimit = errors.New("subscriptions exceeds limit")
 
@@ -30,81 +28,53 @@ var (
 )
 
 // UnsubscribeChannels unsubscribes from a list of websocket channel
-
 func (m *Manager) UnsubscribeChannels(ctx context.Context, conn Connection, channels subscription.List) error {
-
 	if len(channels) == 0 {
-
 		return nil // No channels to unsubscribe from is not an error
-
 	}
 
 	if m.useMultiConnectionManagement {
-
 		if err := common.NilGuard(conn); err != nil {
-
 			return err
-
 		}
 
 		ws, ok := m.managedWebsocket(conn)
 
 		if !ok {
-
 			return fmt.Errorf("%w: %q", errConnectionNotFound, conn.GetURL())
-
 		}
 
 		return m.unsubscribe(ws.subscriptions, channels, func(channels subscription.List) error {
-
 			return ws.setup.Unsubscriber(ctx, conn, channels)
-
 		})
-
 	}
 
 	if m.Unsubscriber == nil {
-
 		return fmt.Errorf("%w: Global Unsubscriber not set", common.ErrNilPointer)
-
 	}
 
 	return m.unsubscribe(m.subscriptions, channels, func(channels subscription.List) error {
-
 		return m.Unsubscriber(channels)
-
 	})
-
 }
 
 func (m *Manager) unsubscribe(store *subscription.Store, channels subscription.List, unsub func(channels subscription.List) error) error {
-
 	if store == nil {
-
 		return nil // No channels to unsubscribe from is not an error
-
 	}
 
 	for _, s := range channels {
-
 		if store.Get(s) == nil {
-
 			return fmt.Errorf("%w: %s", subscription.ErrNotFound, s)
-
 		}
-
 	}
 
 	return unsub(channels)
-
 }
 
 func (m *Manager) managedWebsocket(conn Connection) (*websocket, bool) {
-
 	if conn == nil {
-
 		return nil, false
-
 	}
 
 	m.connectionManagerMu.RLock()
@@ -114,117 +84,85 @@ func (m *Manager) managedWebsocket(conn Connection) (*websocket, bool) {
 	ws := m.connections[conn]
 
 	return ws, ws != nil
-
 }
 
 func (m *Manager) subscriptionStore(conn Connection) *subscription.Store {
-
 	m.connectionManagerMu.RLock()
 
 	defer m.connectionManagerMu.RUnlock()
 
 	if ws, ok := m.connections[conn]; ok && conn != nil {
-
 		return ws.subscriptions
-
 	}
 
 	return m.subscriptions
-
 }
 
 func (m *Manager) initSubscriptionStore(conn Connection) *subscription.Store {
-
 	m.connectionManagerMu.Lock()
 
 	defer m.connectionManagerMu.Unlock()
 
 	if ws, ok := m.connections[conn]; ok && conn != nil {
-
 		if ws.subscriptions == nil {
-
 			ws.subscriptions = subscription.NewStore()
-
 		}
 
 		return ws.subscriptions
-
 	}
 
 	if m.subscriptions == nil {
-
 		m.subscriptions = subscription.NewStore()
-
 	}
 
 	return m.subscriptions
-
 }
 
 // ResubscribeToChannel resubscribes to channel
-
 // Sets state to Resubscribing, and exchanges which want to maintain a lock on it can respect this state and not RemoveSubscription.
-
 // A subscription already in ResubscribingState is retried.
-
 func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *subscription.Subscription) error {
-
 	if s == nil {
-
 		return fmt.Errorf("%w: Subscription param", common.ErrNilPointer)
-
 	}
 
 	m.resubscriptionsMu.Lock()
 
 	if m.resubscriptions == nil {
-
 		m.resubscriptions = make(map[*subscription.Subscription]chan struct{})
-
 	}
 
 	ch, inFlight := m.resubscriptions[s]
 
 	if !inFlight {
-
 		ch = make(chan struct{})
 
 		m.resubscriptions[s] = ch
-
 	}
 
 	m.resubscriptionsMu.Unlock()
 
 	if !inFlight {
-
 		defer func() {
-
 			m.resubscriptionsMu.Lock()
 
 			if currentCh, ok := m.resubscriptions[s]; ok && currentCh == ch {
-
 				delete(m.resubscriptions, s)
 
 				close(ch)
-
 			}
 
 			m.resubscriptionsMu.Unlock()
-
 		}()
-
 	}
 
 	if m.resubscribePreLockHook != nil {
-
 		m.resubscribePreLockHook(s)
-
 	}
 
 	m.m.Lock()
 
 	if inFlight {
-
 		m.m.Unlock()
 
 		m.waitForResubscriptionLeader(s)
@@ -232,11 +170,9 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 		m.m.Lock()
 
 		if s.State() == subscription.SubscribedState {
-
 			m.m.Unlock()
 
 			return nil
-
 		}
 
 		m.resubscriptionsMu.Lock()
@@ -248,21 +184,16 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 		m.resubscriptionsMu.Unlock()
 
 		defer func() {
-
 			m.resubscriptionsMu.Lock()
 
 			if currentCh, ok := m.resubscriptions[s]; ok && currentCh == ch {
-
 				delete(m.resubscriptions, s)
 
 				close(ch)
-
 			}
 
 			m.resubscriptionsMu.Unlock()
-
 		}()
-
 	}
 
 	l := subscription.List{s}
@@ -276,25 +207,18 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 	var origKey any
 
 	if wsStore != nil {
-
 		if origSub := wsStore.Get(s); origSub != nil {
-
 			origKey = origSub.Key
-
 		}
-
 	}
 
 	m.m.Unlock()
 
 	if err := m.UnsubscribeChannels(ctx, conn, l); err != nil {
-
 		return err
-
 	}
 
 	if err := m.SubscribeToChannels(ctx, conn, l); err != nil {
-
 		m.m.Lock()
 
 		restoreFailedRecovery(wsStore, connStore, s, origKey)
@@ -302,11 +226,9 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 		m.m.Unlock()
 
 		return err
-
 	}
 
 	return nil
-
 }
 
 type recoverySnapshot struct {
@@ -316,51 +238,36 @@ type recoverySnapshot struct {
 }
 
 func connectionSubscriptionStore(conn Connection) *subscription.Store {
-
 	if conn == nil {
-
 		return nil
-
 	}
 
 	return conn.Subscriptions()
-
 }
 
 func restoreFailedRecovery(wsStore, connStore *subscription.Store, sub *subscription.Subscription, origKey any) {
-
 	if sub == nil {
-
 		return
-
 	}
 
 	if connStore != nil {
-
 		restoreSubscriptionAfterFailedRecovery(connStore, sub, origKey)
-
 	}
 
 	if wsStore == nil || wsStore == connStore {
-
 		return
-
 	}
 
 	if wsStore.Get(sub) == nil {
-
 		restoreSubscriptionAfterFailedRecovery(wsStore, sub, origKey)
 
 		return
-
 	}
 
 	_ = sub.SetState(subscription.ResubscribingState)
-
 }
 
 func (m *Manager) waitForResubscriptionLeader(s *subscription.Subscription) {
-
 	m.resubscriptionsMu.Lock()
 
 	ch, exists := m.resubscriptions[s]
@@ -368,21 +275,15 @@ func (m *Manager) waitForResubscriptionLeader(s *subscription.Subscription) {
 	m.resubscriptionsMu.Unlock()
 
 	if !exists {
-
 		return
-
 	}
 
 	<-ch
-
 }
 
 func connectionUsedCapacity(store *subscription.Store, incoming subscription.List) int {
-
 	if store == nil {
-
 		return 0
-
 	}
 
 	usedCap := store.Len()
@@ -390,173 +291,115 @@ func connectionUsedCapacity(store *subscription.Store, incoming subscription.Lis
 	discounted := make(map[*subscription.Subscription]struct{}, len(incoming))
 
 	for _, s := range incoming {
-
 		if s == nil || s.State() != subscription.ResubscribingState || store.Get(s) == nil {
-
 			continue
-
 		}
 
 		if _, seen := discounted[s]; seen {
-
 			continue
-
 		}
 
 		discounted[s] = struct{}{}
 
 		usedCap--
-
 	}
 
 	return usedCap
-
 }
 
 func hasLiveRecoveryReplacement(store *subscription.Store, sub *subscription.Subscription, origKey any) bool {
-
 	if store == nil || sub == nil {
-
 		return false
-
 	}
 
 	want := subscription.ExactKey{Subscription: sub}
 
 	for _, existing := range store.List() {
-
 		if existing == sub {
-
 			continue
-
 		}
 
 		if !want.Match(subscription.ExactKey{Subscription: existing}) {
-
 			continue
-
 		}
 
 		if existing.State() != subscription.SubscribedState {
-
 			continue
-
 		}
 
 		if origKey != nil && existing.EnsureKeyed() == origKey {
-
 			continue
-
 		}
 
 		return true
-
 	}
 
 	return false
-
 }
 
 func restoreSubscriptionAfterFailedRecovery(store *subscription.Store, sub *subscription.Subscription, origKey any) {
-
 	if store == nil || sub == nil {
-
 		return
-
 	}
 
 	if hasLiveRecoveryReplacement(store, sub, origKey) {
-
 		if store.Get(sub) != nil {
-
 			_ = sub.SetState(subscription.ResubscribingState)
-
 		}
 
 		return
-
 	}
 
 	if origKey != nil {
-
 		sub.SetKey(origKey)
-
 	}
 
 	_ = sub.SetState(subscription.ResubscribingState)
 
 	if store.Get(sub) == nil {
-
 		_ = store.Add(sub)
-
 	}
-
 }
 
 func setResubscribingState(subs subscription.List) {
-
 	for _, sub := range subs {
-
 		if sub.State() != subscription.ResubscribingState {
-
 			_ = sub.SetState(subscription.ResubscribingState)
-
 		}
-
 	}
-
 }
 
 // SubscribeToChannels subscribes to websocket channels using the exchange specific Subscriber method
-
 // Errors are returned for duplicates or exceeding max Subscriptions
-
 func (m *Manager) SubscribeToChannels(ctx context.Context, conn Connection, subs subscription.List) error {
-
 	if slices.Contains(subs, nil) {
-
 		return fmt.Errorf("%w: List parameter contains an nil element", common.ErrNilPointer)
-
 	}
 
 	if err := m.checkSubscriptions(conn, subs); err != nil {
-
 		return err
-
 	}
 
 	if ws, ok := m.managedWebsocket(conn); ok {
-
 		return ws.setup.Subscriber(ctx, conn, subs)
-
 	}
 
 	if m.Subscriber == nil {
-
 		return fmt.Errorf("%w: Global Subscriber not set", common.ErrNilPointer)
-
 	}
 
 	if err := m.Subscriber(subs); err != nil {
-
 		return fmt.Errorf("%w: %w", ErrSubscriptionFailure, err)
-
 	}
 
 	return nil
-
 }
 
 // AddSubscriptions adds subscriptions to the subscription store
-
 // Sets state to Subscribing unless the state is already set
-
 func (m *Manager) AddSubscriptions(conn Connection, subs ...*subscription.Subscription) error {
-
 	if m == nil {
-
 		return fmt.Errorf("%w: AddSubscriptions called on nil Websocket", common.ErrNilPointer)
-
 	}
 
 	subscriptionStore := m.initSubscriptionStore(conn)
@@ -564,37 +407,24 @@ func (m *Manager) AddSubscriptions(conn Connection, subs ...*subscription.Subscr
 	var errs error
 
 	for _, s := range subs {
-
 		if s.State() == subscription.InactiveState {
-
 			if err := s.SetState(subscription.SubscribingState); err != nil {
-
 				errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
-
 			}
-
 		}
 
 		if err := subscriptionStore.Add(s); err != nil {
-
 			errs = common.AppendError(errs, err)
-
 		}
-
 	}
 
 	return errs
-
 }
 
 // AddSuccessfulSubscriptions marks subscriptions as subscribed and adds them to the subscription store
-
 func (m *Manager) AddSuccessfulSubscriptions(conn Connection, subs ...*subscription.Subscription) error {
-
 	if m == nil {
-
 		return fmt.Errorf("%w: AddSuccessfulSubscriptions called on nil Websocket", common.ErrNilPointer)
-
 	}
 
 	subscriptionStore := m.initSubscriptionStore(conn)
@@ -602,87 +432,58 @@ func (m *Manager) AddSuccessfulSubscriptions(conn Connection, subs ...*subscript
 	var errs error
 
 	for _, s := range subs {
-
 		alreadyTracked := subscriptionStore.Get(s) != nil && s.State() == subscription.ResubscribingState
 
 		if err := s.SetState(subscription.SubscribedState); err != nil {
-
 			errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
-
 		}
 
 		if !alreadyTracked {
-
 			if err := subscriptionStore.Add(s); err != nil {
-
 				errs = common.AppendError(errs, err)
-
 			}
-
 		}
-
 	}
 
 	return errs
-
 }
 
 // RemoveSubscriptions removes subscriptions from the subscription list and sets the status to Unsubscribed
-
 func (m *Manager) RemoveSubscriptions(conn Connection, subs ...*subscription.Subscription) error {
-
 	if m == nil {
-
 		return fmt.Errorf("%w: RemoveSubscriptions called on nil Websocket", common.ErrNilPointer)
-
 	}
 
 	subscriptionStore := m.subscriptionStore(conn)
 
 	if subscriptionStore == nil {
-
 		return fmt.Errorf("%w: RemoveSubscriptions called on uninitialised Websocket", common.ErrNilPointer)
-
 	}
 
 	var errs error
 
 	for _, s := range subs {
-
 		if err := s.SetState(subscription.UnsubscribedState); err != nil {
-
 			errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
-
 		}
 
 		if err := subscriptionStore.Remove(s); err != nil {
-
 			errs = common.AppendError(errs, err)
-
 		}
-
 	}
 
 	return errs
-
 }
 
 // GetSubscription returns a subscription at the key provided
-
 // returns nil if no subscription is at that key or the key is nil
-
 // Keys can implement subscription.MatchableKey in order to provide custom matching logic
-
 func (m *Manager) GetSubscription(key any) *subscription.Subscription {
-
 	if m == nil || key == nil {
-
 		return nil
-
 	}
 
 	for _, ws := range m.snapshotConnectionManager() {
-
 		m.connectionManagerMu.RLock()
 
 		store := ws.subscriptions
@@ -690,125 +491,88 @@ func (m *Manager) GetSubscription(key any) *subscription.Subscription {
 		var sub *subscription.Subscription
 
 		if store != nil {
-
 			sub = store.Get(key)
-
 		}
 
 		m.connectionManagerMu.RUnlock()
 
 		if sub != nil {
-
 			return sub
-
 		}
-
 	}
 
 	if store := m.subscriptionStore(nil); store != nil {
-
 		return store.Get(key)
-
 	}
 
 	return nil
-
 }
 
 // GetSubscriptions returns a new slice of the subscriptions
-
 func (m *Manager) GetSubscriptions() subscription.List {
-
 	if m == nil {
-
 		return nil
-
 	}
 
 	var subs subscription.List
 
 	for _, ws := range m.snapshotConnectionManager() {
-
 		m.connectionManagerMu.RLock()
 
 		store := ws.subscriptions
 
 		if store != nil {
-
 			subs = append(subs, store.List()...)
-
 		}
 
 		m.connectionManagerMu.RUnlock()
-
 	}
 
 	if store := m.subscriptionStore(nil); store != nil {
-
 		subs = append(subs, store.List()...)
-
 	}
 
 	return subs
-
 }
 
 // checkSubscriptions checks subscriptions against the max subscription limit and if the subscription already exists
-
 // The subscription state is not considered when counting existing subscriptions
-
 func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) error {
-
 	var subscriptionStore *subscription.Store
 
 	var connSubStore *subscription.Store
 
 	if ws, ok := m.managedWebsocket(conn); ok {
-
 		if ws.subscriptions == nil {
-
 			return fmt.Errorf("%w: Websocket.subscriptions", common.ErrNilPointer)
-
 		}
 
 		for _, c := range m.snapshotManagedConnections(ws) { // ensure connection is actually managed
-
 			if c == conn {
-
 				connSubStore = c.Subscriptions()
 
 				break
-
 			}
-
 		}
 
 		if connSubStore == nil {
-
 			return fmt.Errorf("%w: connection subscription store not found", common.ErrNilPointer)
-
 		}
 
 		subscriptionStore = ws.subscriptions
-
 	} else {
-
 		subscriptionStore = m.subscriptionStore(nil)
 
 		if subscriptionStore == nil {
-
 			return fmt.Errorf("%w: Websocket.subscriptions", common.ErrNilPointer)
-
 		}
 
 		connSubStore = subscriptionStore
-
 	}
 
 	usedCap := connectionUsedCapacity(connSubStore, subs)
 
 	if m.MaxSubscriptionsPerConnection > 0 && usedCap+len(subs) > m.MaxSubscriptionsPerConnection {
-
 		return fmt.Errorf("%w: current subscriptions: %v, incoming subscriptions: %v, max subscriptions per connection: %v",
 
 			errSubscriptionsExceedsLimit,
@@ -818,221 +582,147 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 			len(subs),
 
 			m.MaxSubscriptionsPerConnection)
-
 	}
 
 	for _, s := range subs {
-
 		if s.State() == subscription.ResubscribingState {
-
 			continue
-
 		}
 
 		if found := subscriptionStore.Get(s); found != nil {
-
 			return fmt.Errorf("%w: %s", subscription.ErrDuplicate, s)
-
 		}
-
 	}
 
 	return nil
-
 }
 
 // FlushChannels flushes channel subscriptions when there is a pair/asset change
-
 func (m *Manager) FlushChannels(ctx context.Context) error {
-
 	m.m.Lock()
 
 	defer m.m.Unlock()
 
 	return m.flushChannels(ctx)
-
 }
 
 func (m *Manager) flushChannels(ctx context.Context) error {
-
 	if !m.IsEnabled() {
-
 		return fmt.Errorf("%s %w", m.exchangeName, ErrWebsocketNotEnabled)
-
 	}
 
 	if !m.IsConnected() {
-
 		return fmt.Errorf("%s %w", m.exchangeName, ErrNotConnected)
-
 	}
 
 	// If the exchange does not support subscribing and or unsubscribing the full connection needs to be flushed to
-
 	// maintain consistency.
 
 	if !m.features.Subscribe || !m.features.Unsubscribe {
-
 		if err := m.shutdown(); err != nil {
-
 			return err
-
 		}
 
 		return m.connect(ctx)
-
 	}
 
 	if !m.useMultiConnectionManagement {
-
 		newSubs, err := m.GenerateSubs()
-
 		if err != nil {
-
 			return err
-
 		}
 
 		return m.updateChannelSubscriptions(ctx, m.subscriptions, newSubs)
-
 	}
 
 	for _, ws := range m.snapshotConnectionManager() {
-
 		if ws.setup.SubscriptionsNotRequired {
-
 			continue
-
 		}
 
 		newSubs, err := ws.setup.GenerateSubscriptions()
-
 		if err != nil {
-
 			return err
-
 		}
 
 		// Case if there is nothing to unsubscribe from and the connection is nil
 
 		if len(newSubs) == 0 && len(m.snapshotManagedConnections(ws)) == 0 {
-
 			continue
-
 		}
 
 		if err := m.scaleConnectionsToSubscriptions(ctx, ws, newSubs); err != nil {
-
 			return err
-
 		}
-
 	}
 
 	return nil
-
 }
 
 // updateChannelSubscriptions subscribes or unsubscribes from channels and checks that the correct number of channels
-
 // have been subscribed to or unsubscribed from.
-
 func (m *Manager) updateChannelSubscriptions(ctx context.Context, store *subscription.Store, incoming subscription.List) error {
-
 	subs, unsubs := store.Diff(incoming)
 
 	if len(unsubs) != 0 {
-
 		if err := m.UnsubscribeChannels(ctx, nil, unsubs); err != nil {
-
 			return err
-
 		}
 
 		if contained := store.Contained(unsubs); len(contained) > 0 {
-
 			return fmt.Errorf("%v %w %q", m.exchangeName, ErrSubscriptionsNotRemoved, contained)
-
 		}
-
 	}
 
 	if len(subs) != 0 {
-
 		if err := m.SubscribeToChannels(ctx, nil, subs); err != nil {
-
 			return err
-
 		}
 
 		if missing := store.Missing(subs); len(missing) > 0 {
-
 			return fmt.Errorf("%v %w %q", m.exchangeName, ErrSubscriptionsNotAdded, missing)
-
 		}
-
 	}
 
 	return nil
-
 }
 
 // applyTrackedSubscriptions records tracked subscriptions in both manager-level and connection-level stores for the provided connection.
-
 func (m *Manager) applyTrackedSubscriptions(conn Connection, tracked subscription.List) error {
-
 	if len(tracked) == 0 {
-
 		return nil
-
 	}
 
 	if err := m.AddSuccessfulSubscriptions(conn, tracked...); err != nil {
-
 		return err
-
 	}
 
 	store := conn.Subscriptions()
 
 	if err := common.NilGuard(store); err != nil {
-
 		return fmt.Errorf("websocket connection %w", err)
-
 	}
 
 	for _, sub := range tracked {
-
 		if err := store.Add(sub); err != nil {
-
 			return err
-
 		}
-
 	}
 
 	return nil
-
 }
 
 // absorbTrackedSubscriptions asks each managed connection whether a subset of subs can be logically tracked on that existing connection.
-
 // It applies tracked subscriptions to manager and connection stores and returns the remaining subscriptions that still need outbound subscribe traffic/new capacity plus the list that were tracked.
-
 func (m *Manager) absorbTrackedSubscriptions(ctx context.Context, ws *websocket, subs subscription.List) (remaining, tracked subscription.List, err error) {
-
 	if len(subs) == 0 || ws == nil || ws.setup == nil || ws.setup.TrackOnExistingConnection == nil {
-
 		return subs, nil, nil
-
 	}
 
 	connections := m.snapshotManagedConnections(ws)
 
 	if len(connections) == 0 {
-
 		return subs, nil, nil
-
 	}
 
 	remaining = subs
@@ -1040,201 +730,133 @@ func (m *Manager) absorbTrackedSubscriptions(ctx context.Context, ws *websocket,
 	tracked = make(subscription.List, 0, len(subs))
 
 	for _, conn := range connections {
-
 		connRemaining, connTracked, err := ws.setup.TrackOnExistingConnection(ctx, conn, remaining)
-
 		if err != nil {
-
 			return nil, nil, err
-
 		}
 
 		if err := m.applyTrackedSubscriptions(conn, connTracked); err != nil {
-
 			return nil, nil, err
-
 		}
 
 		if len(connTracked) != 0 {
-
 			tracked = append(tracked, connTracked...)
-
 		}
 
 		remaining = connRemaining
 
 		if len(remaining) == 0 {
-
 			return nil, tracked, nil
-
 		}
-
 	}
 
 	return remaining, tracked, nil
-
 }
 
 // absorbTrackableSubscriptionsAndValidate absorbs trackable subscriptions onto existing connections and verifies that tracked subscriptions were recorded in the websocket-level subscription store.
-
 func (m *Manager) absorbTrackableSubscriptionsAndValidate(ctx context.Context, ws *websocket, subs subscription.List) (subscription.List, error) {
-
 	remaining, tracked, err := m.absorbTrackedSubscriptions(ctx, ws, subs)
-
 	if err != nil {
-
 		return nil, err
-
 	}
 
 	if len(tracked) == 0 {
-
 		return remaining, nil
-
 	}
 
 	if missing := ws.subscriptions.Missing(tracked); len(missing) > 0 {
-
 		return nil, fmt.Errorf("%w: %w %q", ErrSubscriptionFailure, ErrSubscriptionsNotAdded, missing)
-
 	}
 
 	return remaining, nil
-
 }
 
 // scaleConnectionsToSubscriptions scales connections to subscriptions based off current subscription list and subscription limit
-
 func (m *Manager) scaleConnectionsToSubscriptions(ctx context.Context, ws *websocket, incoming subscription.List) error {
-
 	if err := common.NilGuard(ws); err != nil {
-
 		return err
-
 	}
 
 	subs, unsubs := ws.subscriptions.Diff(incoming)
 
 	if len(unsubs) != 0 {
-
 		currentUnsubs := slices.Clone(unsubs)
 
 		// Unsubscribe first to free up capacity on existing connections
 
 		for _, conn := range m.snapshotManagedConnections(ws) {
-
 			leftOver, err := m.unsubscribeFromConnection(ctx, conn, currentUnsubs)
-
 			if err != nil {
-
 				return err
-
 			}
 
 			currentUnsubs = leftOver
 
 			if len(currentUnsubs) == 0 {
-
 				break
-
 			}
-
 		}
 
 		if len(currentUnsubs) != 0 {
-
 			log.Warnf(log.WebsocketMgr, "%v websocket: unable to find all subscriptions to remove on existing connections, attempting global unsubscribe for %v", m.exchangeName, currentUnsubs)
 
 			for _, s := range currentUnsubs {
-
 				if err := ws.subscriptions.Remove(s); err != nil {
-
 					return err
-
 				}
-
 			}
-
 		}
 
 		if contained := ws.subscriptions.Contained(unsubs); len(contained) > 0 {
-
 			return fmt.Errorf("%v %w %q", m.exchangeName, ErrSubscriptionsNotRemoved, contained)
-
 		}
-
 	}
 
 	if len(subs) != 0 {
-
 		// First, absorb subscriptions that should be tracked on existing
-
 		// connections (e.g. OKX spot/margin equivalents) before the
-
 		// generic capacity-based routing can misplace them.
 
 		currentSubs, err := m.absorbTrackableSubscriptionsAndValidate(ctx, ws, subs)
-
 		if err != nil {
-
 			return err
-
 		}
 
 		// Subscribe to existing connections to use up existing capacity
 
 		for _, conn := range m.snapshotManagedConnections(ws) {
-
 			leftOver, err := m.subscribeToConnection(ctx, conn, currentSubs)
-
 			if err != nil {
-
 				return err
-
 			}
 
 			currentSubs = leftOver
 
 			if len(currentSubs) == 0 {
-
 				break
-
 			}
-
 		}
 
 		// Spawn new connections if there are still subscriptions left to process
 
 		for _, batch := range common.Batch(currentSubs, m.MaxSubscriptionsPerConnection) {
-
 			toConnect, err := m.absorbTrackableSubscriptionsAndValidate(ctx, ws, batch)
-
 			if err != nil {
-
 				return err
-
 			}
 
 			if len(toConnect) == 0 {
-
 				continue
-
 			}
 
 			if err := m.createConnectAndSubscribe(ctx, ws, toConnect); err != nil {
-
 				return err
-
 			}
-
 		}
 
 		if missing := ws.subscriptions.Missing(subs); len(missing) > 0 {
-
 			return fmt.Errorf("%v %w %q", m.exchangeName, ErrSubscriptionsNotAdded, missing)
-
 		}
-
 	}
 
 	// Clean up any connections that have no subscriptions left to reduce resource usage
@@ -1246,53 +868,39 @@ func (m *Manager) scaleConnectionsToSubscriptions(ctx context.Context, ws *webso
 	stale := make([]Connection, 0, len(connections))
 
 	for _, conn := range connections {
-
 		if conn.Subscriptions().Len() != 0 {
-
 			clean = append(clean, conn)
 
 			continue
-
 		}
 
 		stale = append(stale, conn)
-
 	}
 
 	if len(stale) == 0 {
-
 		return nil
-
 	}
 
 	staleSet := make(map[Connection]struct{}, len(stale))
 
 	for _, conn := range stale {
-
 		staleSet[conn] = struct{}{}
-
 	}
 
 	m.connectionManagerMu.Lock()
 
 	for _, conn := range stale {
-
 		delete(m.connections, conn)
-
 	}
 
 	clean = clean[:0]
 
 	for _, conn := range ws.connections {
-
 		if _, ok := staleSet[conn]; ok {
-
 			continue
-
 		}
 
 		clean = append(clean, conn)
-
 	}
 
 	ws.connections = clean
@@ -1300,125 +908,89 @@ func (m *Manager) scaleConnectionsToSubscriptions(ctx context.Context, ws *webso
 	m.connectionManagerMu.Unlock()
 
 	for _, conn := range stale {
-
 		if err := conn.Shutdown(); err != nil {
-
 			log.Warnf(log.WebsocketMgr, "%v websocket: failed to shutdown connection: %v", m.exchangeName, err)
-
 		}
-
 	}
 
 	return nil
-
 }
 
 // ResubscribeFromConnection unsubscribes and resubscribes to a subscription on a connection
-
 func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection, subs subscription.List) error {
-
 	if err := common.NilGuard(conn, subs); err != nil {
-
 		return err
-
 	}
 
 	if len(subs) == 0 {
-
 		return nil
-
 	}
 
 	m.resubscriptionsMu.Lock()
 
 	if m.resubscriptions == nil {
-
 		m.resubscriptions = make(map[*subscription.Subscription]chan struct{})
-
 	}
 
 	allInFlight := true
 
 	for _, s := range subs {
-
 		if _, ok := m.resubscriptions[s]; !ok {
-
 			allInFlight = false
 
 			break
-
 		}
-
 	}
 
 	chans := make([]chan struct{}, 0, len(subs))
 
 	if !allInFlight {
-
 		for _, s := range subs {
-
 			ch := make(chan struct{})
 
 			m.resubscriptions[s] = ch
 
 			chans = append(chans, ch)
-
 		}
-
 	}
 
 	m.resubscriptionsMu.Unlock()
 
 	if !allInFlight {
-
 		defer func() {
-
 			m.resubscriptionsMu.Lock()
 
 			for idx, s := range subs {
-
 				if currentCh, ok := m.resubscriptions[s]; ok && currentCh == chans[idx] {
-
 					delete(m.resubscriptions, s)
 
 					close(chans[idx])
-
 				}
-
 			}
 
 			m.resubscriptionsMu.Unlock()
-
 		}()
-
 	}
 
 	if m.resubscribePreLockHook != nil && len(subs) > 0 {
-
 		m.resubscribePreLockHook(subs[0])
-
 	}
 
 	m.m.Lock()
 
 	if allInFlight {
-
 		m.m.Unlock()
 
 		for _, s := range subs {
-
 			m.waitForResubscriptionLeader(s)
-
 		}
 
 		m.m.Lock()
 
 		if allSubscriptionsState(subs, subscription.SubscribedState) {
-
 			m.m.Unlock()
 
 			return nil
-
 		}
 
 		m.resubscriptionsMu.Lock()
@@ -1426,37 +998,28 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 		chans = make([]chan struct{}, 0, len(subs))
 
 		for _, s := range subs {
-
 			ch := make(chan struct{})
 
 			m.resubscriptions[s] = ch
 
 			chans = append(chans, ch)
-
 		}
 
 		m.resubscriptionsMu.Unlock()
 
 		defer func() {
-
 			m.resubscriptionsMu.Lock()
 
 			for idx, s := range subs {
-
 				if currentCh, ok := m.resubscriptions[s]; ok && currentCh == chans[idx] {
-
 					delete(m.resubscriptions, s)
 
 					close(chans[idx])
-
 				}
-
 			}
 
 			m.resubscriptionsMu.Unlock()
-
 		}()
-
 	}
 
 	wsStore := m.subscriptionStore(conn)
@@ -1466,27 +1029,17 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 	snapshots := make([]recoverySnapshot, len(subs))
 
 	for i, s := range subs {
-
 		snapshots[i] = recoverySnapshot{sub: s}
 
 		if connStore != nil {
-
 			if orig := connStore.Get(s); orig != nil {
-
 				snapshots[i].origKey = orig.Key
-
 			}
-
 		} else if wsStore != nil {
-
 			if orig := wsStore.Get(s); orig != nil {
-
 				snapshots[i].origKey = orig.Key
-
 			}
-
 		}
-
 	}
 
 	setResubscribingState(subs)
@@ -1494,171 +1047,117 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 	m.m.Unlock()
 
 	missing, err := m.unsubscribeFromConnection(ctx, conn, subs)
-
 	if err != nil {
-
 		return err
-
 	}
 
 	if len(missing) > 0 {
-
 		var notRemoved subscription.List
 
 		for _, s := range missing {
-
 			if s.State() != subscription.UnsubscribedState {
-
 				notRemoved = append(notRemoved, s)
-
 			}
-
 		}
 
 		if len(notRemoved) > 0 {
-
 			return fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, notRemoved)
-
 		}
-
 	}
 
 	remaining, err := m.subscribeToConnection(ctx, conn, subs)
-
 	if err != nil {
-
 		m.m.Lock()
 
 		for _, snap := range snapshots {
-
 			if snap.sub.State() == subscription.SubscribedState {
-
 				continue
-
 			}
 
 			restoreFailedRecovery(wsStore, connStore, snap.sub, snap.origKey)
-
 		}
 
 		m.m.Unlock()
 
 		return err
-
 	}
 
 	if len(remaining) > 0 {
-
 		return fmt.Errorf("%w: %q", ErrSubscriptionsNotAdded, remaining)
-
 	}
 
 	return nil
-
 }
 
 func allSubscriptionsState(subs subscription.List, state subscription.State) bool {
-
 	for _, sub := range subs {
-
 		if sub.State() != state {
-
 			return false
-
 		}
-
 	}
 
 	return true
-
 }
 
 // unsubscribeFromConnection unsubscribes for a connection and removes subscriptions from the connection's store
-
 func (m *Manager) unsubscribeFromConnection(ctx context.Context, conn Connection, subs subscription.List) (subscription.List, error) {
-
 	store := conn.Subscriptions()
 
 	if err := common.NilGuard(store); err != nil {
-
 		return nil, fmt.Errorf("websocket connection %w", err)
-
 	}
 
 	remove := store.Contained(subs)
 
 	if len(remove) == 0 {
-
 		return subs, nil
-
 	}
 
 	if err := m.UnsubscribeChannels(ctx, conn, remove); err != nil {
-
 		return nil, err
-
 	}
 
 	missing := store.Missing(subs)
 
 	for _, r := range remove {
-
 		if r.State() == subscription.ResubscribingState {
-
 			continue
-
 		}
 
 		if store.Get(r) == nil {
-
 			continue
-
 		}
 
 		if err := store.Remove(r); err != nil {
-
 			return nil, err
-
 		}
-
 	}
 
 	return missing, nil
-
 }
 
 // subscribeToConnection subscribes for a connection and adds subscriptions to the connection's store
-
 func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, subs subscription.List) (subscription.List, error) {
-
 	store := conn.Subscriptions()
 
 	if err := common.NilGuard(store); err != nil {
-
 		return nil, fmt.Errorf("websocket connection %w", err)
-
 	}
 
 	usedCap := connectionUsedCapacity(store, subs)
 
 	if m.MaxSubscriptionsPerConnection > 0 && usedCap >= m.MaxSubscriptionsPerConnection {
-
 		return subs, nil // No capacity left for this connection
-
 	}
 
 	availableCap := len(subs)
 
 	if m.MaxSubscriptionsPerConnection > 0 {
-
 		availableCap = m.MaxSubscriptionsPerConnection - usedCap
-
 	}
 
 	if availableCap > len(subs) {
-
 		availableCap = len(subs)
-
 	}
 
 	toSubscribe := subs[:availableCap]
@@ -1666,43 +1165,28 @@ func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, su
 	tracked := make(map[*subscription.Subscription]bool, len(toSubscribe))
 
 	for _, s := range toSubscribe {
-
 		tracked[s] = store.Get(s) != nil && s.State() == subscription.ResubscribingState
-
 	}
 
 	if err := m.SubscribeToChannels(ctx, conn, toSubscribe); err != nil {
-
 		return nil, err
-
 	}
 
 	for _, s := range toSubscribe {
-
 		if s.State() != subscription.SubscribedState {
-
 			if err := s.SetState(subscription.SubscribedState); err != nil {
-
 				return nil, err
-
 			}
-
 		}
 
 		if tracked[s] {
-
 			continue
-
 		}
 
 		if err := store.Add(s); err != nil {
-
 			return nil, err
-
 		}
-
 	}
 
 	return subs[availableCap:], nil
-
 }

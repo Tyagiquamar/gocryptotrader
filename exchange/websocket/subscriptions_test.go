@@ -13,7 +13,6 @@ import (
 	gws "github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"github.com/thrasher-corp/gocryptotrader/common"
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/subscription"
@@ -21,7 +20,6 @@ import (
 )
 
 func TestSubscribeUnsubscribe(t *testing.T) {
-
 	t.Parallel()
 
 	ws := NewManager()
@@ -51,29 +49,21 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	bySub := ws.GetSubscription(subscription.Subscription{Channel: "TestSub"})
 
 	if assert.NotNil(t, bySub, "GetSubscription by subscription should find a channel") {
-
 		assert.Equal(t, "TestSub", bySub.Channel, "GetSubscription by default key should return a pointer a copy of the right channel")
 
 		assert.Same(t, bySub, subs[0], "GetSubscription returns the same pointer")
-
 	}
 
 	if assert.NotNil(t, ws.GetSubscription("purple"), "GetSubscription by string key should find a channel") {
-
 		assert.Equal(t, "TestSub2", ws.GetSubscription("purple").Channel, "GetSubscription by string key should return a pointer a copy of the right channel")
-
 	}
 
 	if assert.NotNil(t, ws.GetSubscription(testSubKey{"mauve"}), "GetSubscription by type key should find a channel") {
-
 		assert.Equal(t, "TestSub3", ws.GetSubscription(testSubKey{"mauve"}).Channel, "GetSubscription by type key should return a pointer a copy of the right channel")
-
 	}
 
 	if assert.NotNil(t, ws.GetSubscription(42), "GetSubscription by int key should find a channel") {
-
 		assert.Equal(t, "TestSub4", ws.GetSubscription(42).Channel, "GetSubscription by int key should return a pointer a copy of the right channel")
-
 	}
 
 	assert.Nil(t, ws.GetSubscription(nil), "GetSubscription by nil should return nil")
@@ -103,7 +93,6 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	assert.NoError(t, multi.Setup(set))
 
 	amazingCandidate := &ConnectionSetup{
-
 		URL: "AMAZING",
 
 		Connector: func(context.Context, Connection) error { return nil },
@@ -111,15 +100,11 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 		GenerateSubscriptions: ws.GenerateSubs,
 
 		Subscriber: func(ctx context.Context, c Connection, s subscription.List) error {
-
 			return currySimpleSubConn(multi)(ctx, c, s)
-
 		},
 
 		Unsubscriber: func(ctx context.Context, c Connection, s subscription.List) error {
-
 			return currySimpleUnsubConn(multi)(ctx, c, s)
-
 		},
 
 		Handler: func(context.Context, Connection, []byte) error { return nil },
@@ -130,7 +115,6 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	amazingConn := multi.createConnectionFromSetup(amazingCandidate)
 
 	multi.connections = map[Connection]*websocket{
-
 		amazingConn: multi.connectionManager[0],
 	}
 
@@ -165,29 +149,21 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	bySub = multi.GetSubscription(subscription.Subscription{Channel: "TestSub"})
 
 	if assert.NotNil(t, bySub, "GetSubscription by subscription should find a channel") {
-
 		assert.Equal(t, "TestSub", bySub.Channel, "GetSubscription by default key should return a pointer a copy of the right channel")
 
 		assert.Same(t, bySub, subs[0], "GetSubscription returns the same pointer")
-
 	}
 
 	if assert.NotNil(t, multi.GetSubscription("purple"), "GetSubscription by string key should find a channel") {
-
 		assert.Equal(t, "TestSub2", multi.GetSubscription("purple").Channel, "GetSubscription by string key should return a pointer a copy of the right channel")
-
 	}
 
 	if assert.NotNil(t, multi.GetSubscription(testSubKey{"mauve"}), "GetSubscription by type key should find a channel") {
-
 		assert.Equal(t, "TestSub3", multi.GetSubscription(testSubKey{"mauve"}).Channel, "GetSubscription by type key should return a pointer a copy of the right channel")
-
 	}
 
 	if assert.NotNil(t, multi.GetSubscription(42), "GetSubscription by int key should find a channel") {
-
 		assert.Equal(t, "TestSub4", multi.GetSubscription(42).Channel, "GetSubscription by int key should return a pointer a copy of the right channel")
-
 	}
 
 	assert.Nil(t, multi.GetSubscription(nil), "GetSubscription by nil should return nil")
@@ -207,13 +183,10 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	err = multi.SubscribeToChannels(t.Context(), amazingConn, subscription.List{nil})
 
 	assert.ErrorIs(t, err, common.ErrNilPointer, "Should error correctly when list contains a nil subscription")
-
 }
 
 // TestResubscribe tests Resubscribing to existing subscriptions
-
 func TestResubscribe(t *testing.T) {
-
 	t.Parallel()
 
 	ws := NewManager()
@@ -243,7 +216,6 @@ func TestResubscribe(t *testing.T) {
 	assert.NoError(t, ws.ResubscribeToChannel(t.Context(), nil, channel[0]), "Resubscribe should not error now the channel is subscribed")
 
 	t.Run("Retry after transient subscribe failure", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -259,17 +231,13 @@ func TestResubscribe(t *testing.T) {
 		subscribeCalls := 0
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			subscribeCalls++
 
 			if subscribeCalls == 1 {
-
 				return errDastardlyReason
-
 			}
 
 			return m.AddSuccessfulSubscriptions(nil, subs...)
-
 		}
 
 		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, sub), errDastardlyReason)
@@ -283,11 +251,9 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, subscription.SubscribedState, sub.State())
 
 		require.Equal(t, 2, subscribeCalls)
-
 	})
 
 	t.Run("Concurrent recovery is serialised", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -305,11 +271,9 @@ func TestResubscribe(t *testing.T) {
 		unsubscribes := 0
 
 		m.Unsubscriber = func(subscription.List) error {
-
 			unsubscribes++
 
 			switch unsubscribes {
-
 			case 1:
 
 				close(firstUnsubscribe)
@@ -319,17 +283,13 @@ func TestResubscribe(t *testing.T) {
 			case 2:
 
 				close(secondUnsubscribe)
-
 			}
 
 			return nil
-
 		}
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			return m.AddSuccessfulSubscriptions(nil, subs...)
-
 		}
 
 		var firstErr, secondErr error
@@ -339,11 +299,9 @@ func TestResubscribe(t *testing.T) {
 		wg.Add(2)
 
 		go func() {
-
 			defer wg.Done()
 
 			firstErr = m.ResubscribeToChannel(t.Context(), nil, sub)
-
 		}()
 
 		<-firstUnsubscribe
@@ -351,21 +309,15 @@ func TestResubscribe(t *testing.T) {
 		var signalSecond sync.Once
 
 		m.resubscribePreLockHook = func(s *subscription.Subscription) {
-
 			if s == sub {
-
 				signalSecond.Do(func() { close(secondUnsubscribe) })
-
 			}
-
 		}
 
 		go func() {
-
 			defer wg.Done()
 
 			secondErr = m.ResubscribeToChannel(t.Context(), nil, sub)
-
 		}()
 
 		<-secondUnsubscribe
@@ -381,11 +333,9 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, 1, unsubscribes)
 
 		require.Equal(t, subscription.SubscribedState, sub.State())
-
 	})
 
 	t.Run("Different subscriptions recover concurrently", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -407,47 +357,35 @@ func TestResubscribe(t *testing.T) {
 		releaseSubA := make(chan struct{})
 
 		m.Unsubscriber = func(subs subscription.List) error {
-
 			unsubsMu.Lock()
 
 			for _, s := range subs {
-
 				unsubscribed[s.Channel]++
-
 			}
 
 			unsubsMu.Unlock()
 
 			for _, s := range subs {
-
 				if s.Channel == "subA" {
-
 					close(subAUnsubStarted)
 
 					<-releaseSubA
-
 				}
-
 			}
 
 			return nil
-
 		}
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			unsubsMu.Lock()
 
 			for _, s := range subs {
-
 				subscribed[s.Channel]++
-
 			}
 
 			unsubsMu.Unlock()
 
 			return m.AddSuccessfulSubscriptions(nil, subs...)
-
 		}
 
 		var wg sync.WaitGroup
@@ -457,11 +395,9 @@ func TestResubscribe(t *testing.T) {
 		wg.Add(2)
 
 		go func() {
-
 			defer wg.Done()
 
 			errA = m.ResubscribeToChannel(t.Context(), nil, subA)
-
 		}()
 
 		<-subAUnsubStarted
@@ -471,21 +407,15 @@ func TestResubscribe(t *testing.T) {
 		var signalSubB sync.Once
 
 		m.resubscribePreLockHook = func(s *subscription.Subscription) {
-
 			if s == subB {
-
 				signalSubB.Do(func() { close(subBPreLock) })
-
 			}
-
 		}
 
 		go func() {
-
 			defer wg.Done()
 
 			errB = m.ResubscribeToChannel(t.Context(), nil, subB)
-
 		}()
 
 		<-subBPreLock
@@ -509,11 +439,9 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, subscription.SubscribedState, subA.State())
 
 		require.Equal(t, subscription.SubscribedState, subB.State())
-
 	})
 
 	t.Run("Unrelated manager-lock contention does not drop recovery", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -527,19 +455,15 @@ func TestResubscribe(t *testing.T) {
 		subCalls := 0
 
 		m.Unsubscriber = func(subscription.List) error {
-
 			unsubCalls++
 
 			return nil
-
 		}
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			subCalls++
 
 			return m.AddSuccessfulSubscriptions(nil, subs...)
-
 		}
 
 		m.m.Lock()
@@ -551,19 +475,13 @@ func TestResubscribe(t *testing.T) {
 		var signalPreLock sync.Once
 
 		m.resubscribePreLockHook = func(s *subscription.Subscription) {
-
 			if s == sub {
-
 				signalPreLock.Do(func() { close(preLockReached) })
-
 			}
-
 		}
 
 		go func() {
-
 			recovered <- m.ResubscribeToChannel(t.Context(), nil, sub)
-
 		}()
 
 		<-preLockReached
@@ -583,11 +501,9 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, 1, subCalls)
 
 		require.Equal(t, subscription.SubscribedState, sub.State())
-
 	})
 
 	t.Run("Bitfinex temporary key cleanup pattern during recovery", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -597,15 +513,12 @@ func TestResubscribe(t *testing.T) {
 		require.NoError(t, m.AddSuccessfulSubscriptions(nil, realSub))
 
 		m.Unsubscriber = func(subs subscription.List) error {
-
 			return m.RemoveSubscriptions(nil, subs...)
-
 		}
 
 		recoveries := 0
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			recoveries++
 
 			s := subs[0]
@@ -615,15 +528,11 @@ func TestResubscribe(t *testing.T) {
 			s.Key = tempKey
 
 			if err := m.AddSubscriptions(nil, s); err != nil {
-
 				return err
-
 			}
 
 			defer func() {
-
 				_ = m.RemoveSubscriptions(nil, s)
-
 			}()
 
 			newSub := s.Clone()
@@ -631,7 +540,6 @@ func TestResubscribe(t *testing.T) {
 			newSub.Key = 42 + recoveries
 
 			return m.AddSuccessfulSubscriptions(nil, newSub)
-
 		}
 
 		// 1st recovery
@@ -669,11 +577,9 @@ func TestResubscribe(t *testing.T) {
 		require.NoError(t, m.RemoveSubscriptions(nil, subs...))
 
 		require.Empty(t, m.GetSubscriptions())
-
 	})
 
 	t.Run("Failed recovery does not restore stale key when replacement is live", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -683,25 +589,19 @@ func TestResubscribe(t *testing.T) {
 		require.NoError(t, m.AddSuccessfulSubscriptions(nil, realSub))
 
 		m.Unsubscriber = func(subs subscription.List) error {
-
 			return m.RemoveSubscriptions(nil, subs...)
-
 		}
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			newSub := subs[0].Clone()
 
 			newSub.Key = 43
 
 			if err := m.AddSuccessfulSubscriptions(nil, newSub); err != nil {
-
 				return err
-
 			}
 
 			return errDastardlyReason
-
 		}
 
 		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, realSub), errDastardlyReason)
@@ -715,21 +615,17 @@ func TestResubscribe(t *testing.T) {
 		require.True(t, ok)
 
 		require.Equal(t, 43, chanID)
-
 	})
 
 	t.Run("Nil subscription rejected", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
 
 		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, nil), common.ErrNilPointer)
-
 	})
 
 	t.Run("Coalesced waiter retries when leader recovery fails", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -749,11 +645,9 @@ func TestResubscribe(t *testing.T) {
 		calls := 0
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			calls++
 
 			if calls == 1 {
-
 				close(firstSubscribe)
 
 				<-releaseFirstSubscribe
@@ -761,11 +655,9 @@ func TestResubscribe(t *testing.T) {
 				_ = subs[0].SetState(subscription.SubscribedState)
 
 				return errDastardlyReason
-
 			}
 
 			return m.AddSuccessfulSubscriptions(nil, subs...)
-
 		}
 
 		var leaderErr, waiterErr error
@@ -775,11 +667,9 @@ func TestResubscribe(t *testing.T) {
 		wg.Add(2)
 
 		go func() {
-
 			defer wg.Done()
 
 			leaderErr = m.ResubscribeToChannel(t.Context(), nil, sub)
-
 		}()
 
 		<-firstSubscribe
@@ -787,21 +677,15 @@ func TestResubscribe(t *testing.T) {
 		var signalWaiter sync.Once
 
 		m.resubscribePreLockHook = func(s *subscription.Subscription) {
-
 			if s == sub {
-
 				signalWaiter.Do(func() { close(waiterPreLock) })
-
 			}
-
 		}
 
 		go func() {
-
 			defer wg.Done()
 
 			waiterErr = m.ResubscribeToChannel(t.Context(), nil, sub)
-
 		}()
 
 		<-waiterPreLock
@@ -817,11 +701,9 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, 2, calls)
 
 		require.Equal(t, subscription.SubscribedState, sub.State())
-
 	})
 
 	t.Run("Sibling channel subscription does not block recovery restore", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -837,15 +719,11 @@ func TestResubscribe(t *testing.T) {
 		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sibling, failing))
 
 		m.Unsubscriber = func(subs subscription.List) error {
-
 			return m.RemoveSubscriptions(nil, subs...)
-
 		}
 
 		m.Subscriber = func(subscription.List) error {
-
 			return errDastardlyReason
-
 		}
 
 		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, failing), errDastardlyReason)
@@ -855,11 +733,9 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, subscription.ResubscribingState, failing.State())
 
 		require.Equal(t, subscription.SubscribedState, sibling.State())
-
 	})
 
 	t.Run("Failed recovery followed by FlushChannels", func(t *testing.T) {
-
 		m := NewManager()
 
 		require.NoError(t, m.Setup(newDefaultSetup()))
@@ -877,25 +753,19 @@ func TestResubscribe(t *testing.T) {
 		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
 
 		m.Unsubscriber = func(subs subscription.List) error {
-
 			return m.RemoveSubscriptions(nil, subs...)
-
 		}
 
 		subscribeCalls := 0
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			subscribeCalls++
 
 			if subscribeCalls == 1 {
-
 				return errDastardlyReason
-
 			}
 
 			return m.AddSuccessfulSubscriptions(nil, subs...)
-
 		}
 
 		require.ErrorIs(t, m.ResubscribeToChannel(t.Context(), nil, sub), errDastardlyReason)
@@ -905,9 +775,7 @@ func TestResubscribe(t *testing.T) {
 		require.Same(t, sub, m.GetSubscription(sub))
 
 		m.GenerateSubs = func() (subscription.List, error) {
-
 			return subscription.List{sub}, nil
-
 		}
 
 		require.NoError(t, m.FlushChannels(t.Context()))
@@ -919,9 +787,7 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, 2, subscribeCalls)
 
 		m.GenerateSubs = func() (subscription.List, error) {
-
 			return subscription.List{}, nil
-
 		}
 
 		require.NoError(t, m.FlushChannels(t.Context()))
@@ -929,13 +795,10 @@ func TestResubscribe(t *testing.T) {
 		require.Nil(t, m.GetSubscription(sub))
 
 		require.Equal(t, subscription.UnsubscribedState, sub.State())
-
 	})
-
 }
 
 func TestAllSubscriptionsState(t *testing.T) {
-
 	t.Parallel()
 
 	sub := &subscription.Subscription{Channel: "sub"}
@@ -943,13 +806,10 @@ func TestAllSubscriptionsState(t *testing.T) {
 	assert.True(t, allSubscriptionsState(subscription.List{sub}, subscription.InactiveState))
 
 	assert.False(t, allSubscriptionsState(subscription.List{sub}, subscription.SubscribedState))
-
 }
 
 // TestSubscriptions tests adding, getting and removing subscriptions
-
 func TestSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	w := new(Manager) // Do not use NewManager; We want to exercise w.subs == nil
@@ -979,13 +839,10 @@ func TestSubscriptions(t *testing.T) {
 	require.NoError(t, w.AddSubscriptions(nil, s), "Adding first subscription must not error")
 
 	assert.Equal(t, subscription.ResubscribingState, s.State(), "Should not change resubscribing state")
-
 }
 
 // TestSuccessfulSubscriptions tests adding, getting and removing subscriptions
-
 func TestSuccessfulSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	w := new(Manager) // Do not use NewManager; We want to exercise w.subs == nil
@@ -1017,13 +874,10 @@ func TestSuccessfulSubscriptions(t *testing.T) {
 	w.subscriptions = nil
 
 	assert.ErrorIs(t, w.RemoveSubscriptions(nil, c), common.ErrNilPointer, "Should error correctly when nil websocket")
-
 }
 
 // TestGetSubscription logic test
-
 func TestGetSubscription(t *testing.T) {
-
 	t.Parallel()
 
 	assert.Nil(t, (*Manager).GetSubscription(nil, "imaginary"), "GetSubscription on a nil Websocket should return nil")
@@ -1039,13 +893,10 @@ func TestGetSubscription(t *testing.T) {
 	require.NoError(t, w.AddSubscriptions(nil, s), "AddSubscriptions must not error")
 
 	assert.Same(t, s, w.GetSubscription(42), "GetSubscription should delegate to the store")
-
 }
 
 // TestGetSubscriptions logic test
-
 func TestGetSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	assert.Nil(t, (*Manager).GetSubscriptions(nil), "GetSubscription on a nil Websocket should return nil")
@@ -1055,7 +906,6 @@ func TestGetSubscriptions(t *testing.T) {
 	w := NewManager()
 
 	s := subscription.List{
-
 		{Key: 42, Channel: "hello3"},
 
 		{Key: 45, Channel: "hello4"},
@@ -1066,11 +916,9 @@ func TestGetSubscriptions(t *testing.T) {
 	require.NoError(t, err, "AddSubscriptions must not error")
 
 	assert.ElementsMatch(t, s, w.GetSubscriptions(), "GetSubscriptions should return the correct channel details")
-
 }
 
 func TestCheckSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	ws := Manager{}
@@ -1120,7 +968,6 @@ func TestCheckSubscriptions(t *testing.T) {
 	conn := &connection{}
 
 	ws.connections = map[Connection]*websocket{
-
 		conn: {},
 	}
 
@@ -1147,7 +994,6 @@ func TestCheckSubscriptions(t *testing.T) {
 	capConn := &connection{subscriptions: subscription.NewStore()}
 
 	ws.connections[capConn] = &websocket{
-
 		subscriptions: capConn.Subscriptions(),
 
 		connections: []Connection{capConn},
@@ -1172,11 +1018,9 @@ func TestCheckSubscriptions(t *testing.T) {
 	err = ws.checkSubscriptions(capConn, subscription.List{unrelated})
 
 	require.ErrorIs(t, err, errSubscriptionsExceedsLimit)
-
 }
 
 func TestUpdateChannelSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	ws := NewManager()
@@ -1190,19 +1034,13 @@ func TestUpdateChannelSubscriptions(t *testing.T) {
 	require.Zero(t, store.Len())
 
 	ws.Subscriber = func(subs subscription.List) error {
-
 		for _, sub := range subs {
-
 			if err := store.Add(sub); err != nil {
-
 				return err
-
 			}
-
 		}
 
 		return nil
-
 	}
 
 	ws.subscriptions = store
@@ -1218,19 +1056,13 @@ func TestUpdateChannelSubscriptions(t *testing.T) {
 	require.ErrorIs(t, err, common.ErrNilPointer)
 
 	ws.Unsubscriber = func(subs subscription.List) error {
-
 		for _, sub := range subs {
-
 			if err := store.Remove(sub); err != nil {
-
 				return err
-
 			}
-
 		}
 
 		return nil
-
 	}
 
 	err = ws.updateChannelSubscriptions(t.Context(), store, subscription.List{})
@@ -1238,15 +1070,12 @@ func TestUpdateChannelSubscriptions(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Zero(t, store.Len())
-
 }
 
 func TestInitSubscriptionStore(t *testing.T) {
-
 	t.Parallel()
 
 	t.Run("GlobalStore", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager := &Manager{}
@@ -1256,11 +1085,9 @@ func TestInitSubscriptionStore(t *testing.T) {
 		require.NotNil(t, store, "global subscription store must be initialised")
 
 		assert.Same(t, store, manager.subscriptions, "global subscription store should be retained on the manager")
-
 	})
 
 	t.Run("ManagedConnectionStore", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager, conn := newManagedSubscriptionTestManagerWithStore(t, nil)
@@ -1274,53 +1101,34 @@ func TestInitSubscriptionStore(t *testing.T) {
 		assert.Same(t, store, manager.connectionManager[0].subscriptions, "managed websocket should retain the initialised store")
 
 		assert.NotSame(t, store, manager.subscriptions, "managed connection should keep an isolated subscription store")
-
 	})
-
 }
 
 func currySimpleSub(w *Manager) func(subscription.List) error {
-
 	return func(subs subscription.List) error {
-
 		return w.AddSuccessfulSubscriptions(nil, subs...)
-
 	}
-
 }
 
 func currySimpleSubConn(w *Manager) func(context.Context, Connection, subscription.List) error {
-
 	return func(_ context.Context, conn Connection, subs subscription.List) error {
-
 		return w.AddSuccessfulSubscriptions(conn, subs...)
-
 	}
-
 }
 
 func currySimpleUnsub(w *Manager) func(subscription.List) error {
-
 	return func(unsubs subscription.List) error {
-
 		return w.RemoveSubscriptions(nil, unsubs...)
-
 	}
-
 }
 
 func currySimpleUnsubConn(w *Manager) func(context.Context, Connection, subscription.List) error {
-
 	return func(_ context.Context, conn Connection, unsubs subscription.List) error {
-
 		return w.RemoveSubscriptions(conn, unsubs...)
-
 	}
-
 }
 
 func newManagedSubscriptionTestManagerWithStore(t *testing.T, store *subscription.Store) (*Manager, Connection) {
-
 	t.Helper()
 
 	manager := NewManager()
@@ -1332,21 +1140,15 @@ func newManagedSubscriptionTestManagerWithStore(t *testing.T, store *subscriptio
 	require.NoError(t, manager.Setup(setup))
 
 	ws := &websocket{
-
 		setup: &ConnectionSetup{
-
 			URL: "wss://managed-subscriptions.test/ws",
 
 			Subscriber: func(_ context.Context, conn Connection, subs subscription.List) error {
-
 				return manager.AddSuccessfulSubscriptions(conn, subs...)
-
 			},
 
 			Unsubscriber: func(_ context.Context, conn Connection, subs subscription.List) error {
-
 				return manager.RemoveSubscriptions(conn, subs...)
-
 			},
 		},
 
@@ -1354,7 +1156,6 @@ func newManagedSubscriptionTestManagerWithStore(t *testing.T, store *subscriptio
 	}
 
 	conn := &connection{
-
 		URL: ws.setup.URL,
 
 		subscriptions: subscription.NewStore(),
@@ -1371,19 +1172,15 @@ func newManagedSubscriptionTestManagerWithStore(t *testing.T, store *subscriptio
 	manager.connectionManagerMu.Unlock()
 
 	return manager, conn
-
 }
 
 func newManagedSubscriptionTestManager(t *testing.T) (*Manager, Connection) {
-
 	t.Helper()
 
 	return newManagedSubscriptionTestManagerWithStore(t, subscription.NewStore())
-
 }
 
 func startSubscriptionReaders(manager *Manager) func() {
-
 	done := make(chan struct{})
 
 	var wg sync.WaitGroup
@@ -1391,13 +1188,9 @@ func startSubscriptionReaders(manager *Manager) func() {
 	var once sync.Once
 
 	for range 4 {
-
 		wg.Go(func() {
-
 			for {
-
 				select {
-
 				case <-done:
 
 					return
@@ -1407,31 +1200,21 @@ func startSubscriptionReaders(manager *Manager) func() {
 					_ = manager.GetSubscription("missing")
 
 					_ = manager.GetSubscriptions()
-
 				}
-
 			}
-
 		})
-
 	}
 
 	return func() {
-
 		once.Do(func() {
-
 			close(done)
 
 			wg.Wait()
-
 		})
-
 	}
-
 }
 
 func runConcurrentSubscriptionOps(t *testing.T, workers int, op func(int) error) {
-
 	t.Helper()
 
 	start := make(chan struct{})
@@ -1441,15 +1224,11 @@ func runConcurrentSubscriptionOps(t *testing.T, workers int, op func(int) error)
 	var wg sync.WaitGroup
 
 	for i := range workers {
-
 		wg.Go(func() {
-
 			<-start
 
 			errs <- op(i)
-
 		})
-
 	}
 
 	close(start)
@@ -1459,34 +1238,26 @@ func runConcurrentSubscriptionOps(t *testing.T, workers int, op func(int) error)
 	close(errs)
 
 	for err := range errs {
-
 		require.NoError(t, err)
-
 	}
-
 }
 
 func newConcurrentSubscription(channel string, index int) *subscription.Subscription {
-
 	name := fmt.Sprintf("%s-%d", channel, index)
 
 	return &subscription.Subscription{
-
 		Key: name,
 
 		Channel: name,
 	}
-
 }
 
 func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
-
 	t.Parallel()
 
 	const workers = 32
 
 	t.Run("AddSubscriptions", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager, conn := newManagedSubscriptionTestManager(t)
@@ -1498,15 +1269,11 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		subs := make(subscription.List, workers)
 
 		for i := range workers {
-
 			subs[i] = newConcurrentSubscription("add", i)
-
 		}
 
 		runConcurrentSubscriptionOps(t, workers, func(i int) error {
-
 			return manager.AddSubscriptions(conn, subs[i])
-
 		})
 
 		stopReaders()
@@ -1514,17 +1281,13 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		require.Len(t, manager.GetSubscriptions(), workers)
 
 		for _, sub := range subs {
-
 			require.Same(t, sub, manager.GetSubscription(sub))
 
 			assert.Equal(t, subscription.SubscribingState, sub.State())
-
 		}
-
 	})
 
 	t.Run("AddSuccessfulSubscriptions", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager, conn := newManagedSubscriptionTestManager(t)
@@ -1536,15 +1299,11 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		subs := make(subscription.List, workers)
 
 		for i := range workers {
-
 			subs[i] = newConcurrentSubscription("success", i)
-
 		}
 
 		runConcurrentSubscriptionOps(t, workers, func(i int) error {
-
 			return manager.AddSuccessfulSubscriptions(conn, subs[i])
-
 		})
 
 		stopReaders()
@@ -1552,17 +1311,13 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		require.Len(t, manager.GetSubscriptions(), workers)
 
 		for _, sub := range subs {
-
 			require.Same(t, sub, manager.GetSubscription(sub))
 
 			assert.Equal(t, subscription.SubscribedState, sub.State())
-
 		}
-
 	})
 
 	t.Run("RemoveSubscriptions", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager, conn := newManagedSubscriptionTestManager(t)
@@ -1570,9 +1325,7 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		subs := make(subscription.List, workers)
 
 		for i := range workers {
-
 			subs[i] = newConcurrentSubscription("remove", i)
-
 		}
 
 		require.NoError(t, manager.AddSuccessfulSubscriptions(conn, subs...))
@@ -1582,9 +1335,7 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		defer stopReaders()
 
 		runConcurrentSubscriptionOps(t, workers, func(i int) error {
-
 			return manager.RemoveSubscriptions(conn, subs[i])
-
 		})
 
 		stopReaders()
@@ -1592,17 +1343,13 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		assert.Empty(t, manager.GetSubscriptions())
 
 		for _, sub := range subs {
-
 			assert.Nil(t, manager.GetSubscription(sub))
 
 			assert.Equal(t, subscription.UnsubscribedState, sub.State())
-
 		}
-
 	})
 
 	t.Run("SubscribeToChannels", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager, conn := newManagedSubscriptionTestManager(t)
@@ -1614,15 +1361,11 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		subs := make(subscription.List, workers)
 
 		for i := range workers {
-
 			subs[i] = newConcurrentSubscription("subscribe", i)
-
 		}
 
 		runConcurrentSubscriptionOps(t, workers, func(i int) error {
-
 			return manager.SubscribeToChannels(t.Context(), conn, subscription.List{subs[i]})
-
 		})
 
 		stopReaders()
@@ -1630,17 +1373,13 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		require.Len(t, manager.GetSubscriptions(), workers)
 
 		for _, sub := range subs {
-
 			require.Same(t, sub, manager.GetSubscription(sub))
 
 			assert.Equal(t, subscription.SubscribedState, sub.State())
-
 		}
-
 	})
 
 	t.Run("UnsubscribeChannels", func(t *testing.T) {
-
 		t.Parallel()
 
 		manager, conn := newManagedSubscriptionTestManager(t)
@@ -1648,9 +1387,7 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		subs := make(subscription.List, workers)
 
 		for i := range workers {
-
 			subs[i] = newConcurrentSubscription("unsubscribe", i)
-
 		}
 
 		require.NoError(t, manager.AddSuccessfulSubscriptions(conn, subs...))
@@ -1660,9 +1397,7 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		defer stopReaders()
 
 		runConcurrentSubscriptionOps(t, workers, func(i int) error {
-
 			return manager.UnsubscribeChannels(t.Context(), conn, subscription.List{subs[i]})
-
 		})
 
 		stopReaders()
@@ -1670,19 +1405,14 @@ func TestExportedManagedSubscriptionFunctionsConcurrent(t *testing.T) {
 		assert.Empty(t, manager.GetSubscriptions())
 
 		for _, sub := range subs {
-
 			assert.Nil(t, manager.GetSubscription(sub))
 
 			assert.Equal(t, subscription.UnsubscribedState, sub.State())
-
 		}
-
 	})
-
 }
 
 func TestManagedSubscriptionGettersConcurrentStoreInit(t *testing.T) {
-
 	t.Parallel()
 
 	const workers = 32
@@ -1696,15 +1426,11 @@ func TestManagedSubscriptionGettersConcurrentStoreInit(t *testing.T) {
 	subs := make(subscription.List, workers)
 
 	for i := range workers {
-
 		subs[i] = newConcurrentSubscription("initialise", i)
-
 	}
 
 	runConcurrentSubscriptionOps(t, workers, func(i int) error {
-
 		return manager.AddSuccessfulSubscriptions(conn, subs[i])
-
 	})
 
 	stopReaders()
@@ -1712,15 +1438,11 @@ func TestManagedSubscriptionGettersConcurrentStoreInit(t *testing.T) {
 	require.Len(t, manager.GetSubscriptions(), workers)
 
 	for _, sub := range subs {
-
 		require.Same(t, sub, manager.GetSubscription(sub))
-
 	}
-
 }
 
 func TestFlushChannelsConcurrentReaders(t *testing.T) {
-
 	t.Parallel()
 
 	manager, conn := newManagedSubscriptionTestManager(t)
@@ -1732,16 +1454,13 @@ func TestFlushChannelsConcurrentReaders(t *testing.T) {
 	manager.MaxSubscriptionsPerConnection = 2
 
 	expected := subscription.List{
-
 		newConcurrentSubscription("flush", 0),
 
 		newConcurrentSubscription("flush", 1),
 	}
 
 	manager.connectionManager[0].setup.GenerateSubscriptions = func() (subscription.List, error) {
-
 		return expected, nil
-
 	}
 
 	stopReaders := startSubscriptionReaders(manager)
@@ -1749,9 +1468,7 @@ func TestFlushChannelsConcurrentReaders(t *testing.T) {
 	defer stopReaders()
 
 	runConcurrentSubscriptionOps(t, 8, func(int) error {
-
 		return manager.FlushChannels(t.Context())
-
 	})
 
 	stopReaders()
@@ -1761,15 +1478,11 @@ func TestFlushChannelsConcurrentReaders(t *testing.T) {
 	require.Len(t, conn.Subscriptions().List(), len(expected))
 
 	for _, sub := range expected {
-
 		require.Same(t, sub, manager.GetSubscription(sub))
-
 	}
-
 }
 
 func TestFlushChannels(t *testing.T) {
-
 	t.Parallel()
 
 	// Enabled pairs/setup system
@@ -1787,7 +1500,6 @@ func TestFlushChannels(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotConnected, "FlushChannels should error correctly")
 
 	newgen := GenSubs{EnabledPairs: []currency.Pair{
-
 		currency.NewPair(currency.BTC, currency.AUD),
 
 		currency.NewBTCUSDT(),
@@ -1798,9 +1510,7 @@ func TestFlushChannels(t *testing.T) {
 	var cleanupMonitors sync.Once
 
 	cleanupW := func() {
-
 		cleanupMonitors.Do(func() { cleanupManagerMonitors(t, w) })
-
 	}
 
 	t.Cleanup(cleanupW)
@@ -1836,19 +1546,13 @@ func TestFlushChannels(t *testing.T) {
 	require.ErrorIs(t, w.FlushChannels(t.Context()), ErrSubscriptionsNotAdded, "FlushChannels must error correctly on no subscriptions added")
 
 	w.Subscriber = func(subs subscription.List) error {
-
 		for _, sub := range subs {
-
 			if err := w.subscriptions.Add(sub); err != nil {
-
 				return err
-
 			}
-
 		}
 
 		return nil
-
 	}
 
 	require.NoError(t, w.FlushChannels(t.Context()), "FlushChannels must not error")
@@ -1864,19 +1568,13 @@ func TestFlushChannels(t *testing.T) {
 	require.ErrorIs(t, w.FlushChannels(t.Context()), ErrSubscriptionsNotRemoved)
 
 	w.Unsubscriber = func(subs subscription.List) error {
-
 		for _, sub := range subs {
-
 			if err := w.subscriptions.Remove(sub); err != nil {
-
 				return err
-
 			}
-
 		}
 
 		return nil
-
 	}
 
 	assert.NoError(t, w.FlushChannels(t.Context()), "FlushChannels should not error")
@@ -1898,7 +1596,6 @@ func TestFlushChannels(t *testing.T) {
 	w.subscriptions = subscription.NewStore()
 
 	err = w.subscriptions.Add(&subscription.Subscription{
-
 		Key: 41,
 
 		Channel: "match channel",
@@ -1909,7 +1606,6 @@ func TestFlushChannels(t *testing.T) {
 	require.NoError(t, err, "AddSubscription must not error")
 
 	err = w.subscriptions.Add(&subscription.Subscription{
-
 		Key: 42,
 
 		Channel: "unsub channel",
@@ -1942,13 +1638,10 @@ func TestFlushChannels(t *testing.T) {
 	w.subscriptions = subscription.NewStore()
 
 	amazingCandidate := &ConnectionSetup{
-
 		URL: "ws" + mock.URL[len("http"):] + "/ws",
 
 		Connector: func(ctx context.Context, conn Connection) error {
-
 			return conn.Dial(ctx, gws.DefaultDialer, nil, nil)
-
 		},
 
 		GenerateSubscriptions: newgen.generateSubs,
@@ -1965,9 +1658,7 @@ func TestFlushChannels(t *testing.T) {
 	require.ErrorIs(t, w.FlushChannels(t.Context()), ErrSubscriptionsNotAdded, "Must error when no subscriptions are added to the subscription store")
 
 	w.connectionManager[0].setup.Subscriber = func(ctx context.Context, c Connection, s subscription.List) error {
-
 		return currySimpleSubConn(w)(ctx, c, s)
-
 	}
 
 	require.NoError(t, w.FlushChannels(t.Context()), "FlushChannels must not error")
@@ -1979,7 +1670,6 @@ func TestFlushChannels(t *testing.T) {
 	require.NoError(t, w.FlushChannels(t.Context()), "FlushChannels must not error")
 
 	// Unsubscribe what's already subscribed. No subscriptions left over, which then forces the shutdown and removal
-
 	// of the connection from management.
 
 	w.features.Subscribe = true
@@ -1989,17 +1679,13 @@ func TestFlushChannels(t *testing.T) {
 	require.ErrorIs(t, w.FlushChannels(t.Context()), ErrSubscriptionsNotRemoved, "Must error when no subscriptions are removed from subscription store")
 
 	w.connectionManager[0].setup.Unsubscriber = func(ctx context.Context, c Connection, s subscription.List) error {
-
 		return currySimpleUnsubConn(w)(ctx, c, s)
-
 	}
 
 	require.NoError(t, w.FlushChannels(t.Context()), "FlushChannels must not error")
-
 }
 
 // fakeConnection is a minimal Connection implementation used in cleanup tests.
-
 type fakeConnection struct {
 	Connection
 
@@ -2011,51 +1697,37 @@ type fakeConnection struct {
 }
 
 func (f *fakeConnection) Shutdown() error {
-
 	f.shutdownCalled = true
 
 	return nil
-
 }
 
 func (f *fakeConnection) Subscriptions() *subscription.Store {
-
 	if f.subscriptionsHook != nil {
-
 		f.subscriptionsHook()
-
 	}
 
 	return f.subscriptions
-
 }
 
 func cleanupManagedConnectionReaders(t *testing.T, m *Manager, ws *websocket) {
-
 	t.Helper()
 
 	if m == nil || ws == nil {
-
 		return
-
 	}
 
 	for _, conn := range m.snapshotManagedConnections(ws) {
-
 		_ = conn.Shutdown()
-
 	}
 
 	resetManagerForNextConnectAttempt(t, m)
-
 }
 
 func TestApplyTrackedSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	t.Run("NoTrackedSubscriptionsNoOp", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2063,11 +1735,9 @@ func TestApplyTrackedSubscriptions(t *testing.T) {
 		conn := &fakeConnection{}
 
 		require.NoError(t, m.applyTrackedSubscriptions(conn, nil))
-
 	})
 
 	t.Run("RecordsInManagerAndConnectionStores", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2087,11 +1757,9 @@ func TestApplyTrackedSubscriptions(t *testing.T) {
 		require.NotNil(t, conn.subscriptions.Get(sub), "tracked subscription must be recorded in connection store")
 
 		assert.Equal(t, subscription.SubscribedState, sub.State())
-
 	})
 
 	t.Run("ErrorsWhenConnectionStoreIsNil", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2107,17 +1775,13 @@ func TestApplyTrackedSubscriptions(t *testing.T) {
 		err := m.applyTrackedSubscriptions(conn, subscription.List{sub})
 
 		require.ErrorIs(t, err, common.ErrNilPointer)
-
 	})
-
 }
 
 func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
-
 	t.Parallel()
 
 	t.Run("PassThroughWithoutTrackHook", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2125,7 +1789,6 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		subs := subscription.List{{Channel: "A"}}
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{},
 
 			subscriptions: subscription.NewStore(),
@@ -2138,11 +1801,9 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, subs, remaining)
-
 	})
 
 	t.Run("PropagatesTrackError", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2150,13 +1811,9 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		expectedErr := errors.New("track failed")
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				TrackOnExistingConnection: func(context.Context, Connection, subscription.List) (subscription.List, subscription.List, error) {
-
 					return nil, nil, expectedErr
-
 				},
 			},
 
@@ -2170,11 +1827,9 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		require.ErrorIs(t, err, expectedErr)
 
 		assert.Nil(t, remaining)
-
 	})
 
 	t.Run("ErrorsWhenTrackedSubsNotRecordedOnWebsocketStore", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2184,13 +1839,9 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		conn := &fakeConnection{subscriptions: subscription.NewStore()}
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				TrackOnExistingConnection: func(context.Context, Connection, subscription.List) (subscription.List, subscription.List, error) {
-
 					return nil, subscription.List{trackedSub}, nil
-
 				},
 			},
 
@@ -2200,7 +1851,6 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		}
 
 		// Intentionally do not map conn -> ws; manager-level tracking goes to
-
 		// the global store, allowing validation to detect missing websocket state.
 
 		remaining, err := m.absorbTrackableSubscriptionsAndValidate(t.Context(), ws, subscription.List{trackedSub})
@@ -2210,11 +1860,9 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		require.ErrorIs(t, err, ErrSubscriptionsNotAdded)
 
 		assert.Nil(t, remaining)
-
 	})
 
 	t.Run("ReturnsRemainingAndRecordsTracked", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2226,13 +1874,9 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		conn := &fakeConnection{subscriptions: subscription.NewStore()}
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				TrackOnExistingConnection: func(_ context.Context, _ Connection, _ subscription.List) (subscription.List, subscription.List, error) {
-
 					return subscription.List{remainingSub}, subscription.List{trackedSub}, nil
-
 				},
 			},
 
@@ -2254,17 +1898,13 @@ func TestAbsorbSubscriptionsAndValidate(t *testing.T) {
 		require.NotNil(t, ws.subscriptions.Get(trackedSub))
 
 		require.NotNil(t, conn.subscriptions.Get(trackedSub))
-
 	})
-
 }
 
 func TestAbsorbTrackedSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	t.Run("PassthroughWithoutTrackHook", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2272,7 +1912,6 @@ func TestAbsorbTrackedSubscriptions(t *testing.T) {
 		subs := subscription.List{{Channel: "A"}}
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{},
 
 			connections: []Connection{&fakeConnection{subscriptions: subscription.NewStore()}},
@@ -2285,11 +1924,9 @@ func TestAbsorbTrackedSubscriptions(t *testing.T) {
 		assert.Equal(t, subs, remaining)
 
 		assert.Empty(t, tracked)
-
 	})
 
 	t.Run("TracksAcrossConnectionsUntilEmpty", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2301,19 +1938,13 @@ func TestAbsorbTrackedSubscriptions(t *testing.T) {
 		conn1 := &fakeConnection{subscriptions: subscription.NewStore()}
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				TrackOnExistingConnection: func(_ context.Context, conn Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 					if conn != conn1 {
-
 						return subs, nil, nil
-
 					}
 
 					return nil, subscription.List{tracked}, nil
-
 				},
 			},
 
@@ -2341,11 +1972,9 @@ func TestAbsorbTrackedSubscriptions(t *testing.T) {
 		require.NotNil(t, conn1.subscriptions.Get(tracked))
 
 		assert.Nil(t, conn0.subscriptions.Get(tracked))
-
 	})
 
 	t.Run("PropagatesErrors", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2353,13 +1982,9 @@ func TestAbsorbTrackedSubscriptions(t *testing.T) {
 		expectedErr := errors.New("track failed")
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				TrackOnExistingConnection: func(context.Context, Connection, subscription.List) (subscription.List, subscription.List, error) {
-
 					return nil, nil, expectedErr
-
 				},
 			},
 
@@ -2373,19 +1998,15 @@ func TestAbsorbTrackedSubscriptions(t *testing.T) {
 		assert.Nil(t, remaining)
 
 		assert.Nil(t, tracked)
-
 	})
-
 }
 
 func TestScaleConnectionsToSubscriptions(t *testing.T) {
-
 	t.Parallel()
 
 	// Common setup helper
 
 	setup := func(t *testing.T, isMultiConn bool) (*Manager, *websocket) {
-
 		t.Helper()
 
 		m := NewManager()
@@ -2397,35 +2018,25 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		// Mock server for dialing
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 			mockws.WsMockUpgrader(t, w, r, mockws.EchoHandler)
-
 		}))
 
 		t.Cleanup(srv.Close)
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				URL: "ws" + srv.URL[len("http"):] + "/ws",
 
 				Connector: func(ctx context.Context, c Connection) error {
-
 					return c.Dial(ctx, gws.DefaultDialer, nil, nil)
-
 				},
 
 				Subscriber: func(_ context.Context, c Connection, s subscription.List) error {
-
 					return m.AddSuccessfulSubscriptions(c, s...)
-
 				},
 
 				Unsubscriber: func(_ context.Context, c Connection, s subscription.List) error {
-
 					return m.RemoveSubscriptions(c, s...)
-
 				},
 
 				Handler: func(context.Context, Connection, []byte) error { return nil },
@@ -2437,11 +2048,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		t.Cleanup(func() { cleanupManagedConnectionReaders(t, m, ws) })
 
 		return m, ws
-
 	}
 
 	t.Run("Nil ws", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, _ := setup(t, false)
@@ -2449,11 +2058,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		err := m.scaleConnectionsToSubscriptions(t.Context(), nil, nil)
 
 		require.ErrorIs(t, err, common.ErrNilPointer)
-
 	})
 
 	t.Run("No Changes", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, false)
@@ -2461,11 +2068,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		err := m.scaleConnectionsToSubscriptions(t.Context(), ws, nil)
 
 		require.NoError(t, err)
-
 	})
 
 	t.Run("Scale Up (Add Subs)", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, false)
@@ -2479,11 +2084,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.Equal(t, 3, ws.subscriptions.Len())
 
 		assert.Len(t, ws.connections, 2) // 2 per conn -> 2 conns
-
 	})
 
 	t.Run("Scale Down (Remove Subs)", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, true)
@@ -2507,11 +2110,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.Equal(t, 0, ws.subscriptions.Len())
 
 		assert.Empty(t, ws.connections)
-
 	})
 
 	t.Run("Unsubscribe Error", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, true)
@@ -2525,19 +2126,15 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		// Now set error and remove
 
 		ws.setup.Unsubscriber = func(context.Context, Connection, subscription.List) error {
-
 			return errors.New("unsub fail")
-
 		}
 
 		err := m.scaleConnectionsToSubscriptions(t.Context(), ws, nil)
 
 		require.ErrorContains(t, err, "unsub fail")
-
 	})
 
 	t.Run("Subscribe Error (Existing Connection)", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, false)
@@ -2549,9 +2146,7 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		// Set error
 
 		ws.setup.Subscriber = func(context.Context, Connection, subscription.List) error {
-
 			return errors.New("sub fail")
-
 		}
 
 		// Add another sub (should use existing connection)
@@ -2559,29 +2154,23 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		err := m.scaleConnectionsToSubscriptions(t.Context(), ws, subscription.List{{Channel: "A"}, {Channel: "B"}})
 
 		require.ErrorContains(t, err, "sub fail")
-
 	})
 
 	t.Run("Subscribe Error (New Connection)", func(t *testing.T) {
-
 		m, ws := setup(t, false)
 
 		// Set connector error
 
 		ws.setup.Connector = func(context.Context, Connection) error {
-
 			return errors.New("connect fail")
-
 		}
 
 		err := m.scaleConnectionsToSubscriptions(t.Context(), ws, subscription.List{{Channel: "A"}})
 
 		require.ErrorContains(t, err, "connect fail")
-
 	})
 
 	t.Run("Global Unsubscribe Fallback Success", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, false)
@@ -2601,11 +2190,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		require.NoError(t, m.scaleConnectionsToSubscriptions(t.Context(), ws, in))
 
 		assert.Equal(t, 0, ws.subscriptions.Len())
-
 	})
 
 	t.Run("Missing Subscriptions After Subscribe", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, false)
@@ -2627,11 +2214,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.NotNil(t, ws.subscriptions.Get(s1))
 
 		assert.NotNil(t, ws.subscriptions.Get(s2))
-
 	})
 
 	t.Run("Multi-batch ConnectAndSubscribe Success", func(t *testing.T) {
-
 		t.Parallel()
 
 		m, ws := setup(t, false)
@@ -2645,11 +2230,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		// With max 2 subs per connection and 5 total, we expect 3 connections
 
 		assert.Len(t, ws.connections, 3)
-
 	})
 
 	t.Run("Track On Existing Connection Prevents New Connection", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2667,25 +2250,17 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		require.NoError(t, activeConn.subscriptions.Add(existing))
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				Connector: func(context.Context, Connection) error {
-
 					return errors.New("should not create a new connection")
-
 				},
 
 				TrackOnExistingConnection: func(_ context.Context, _ Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 					if len(subs) != 1 || subs[0].Channel != logical.Channel {
-
 						return subs, nil, nil
-
 					}
 
 					return nil, subscription.List{logical}, nil
-
 				},
 			},
 
@@ -2707,11 +2282,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.Equal(t, 2, ws.subscriptions.Len())
 
 		assert.Equal(t, 2, activeConn.subscriptions.Len())
-
 	})
 
 	t.Run("Track On Existing Connection Targets Owning Connection", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2721,7 +2294,6 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		m.connections = make(map[Connection]*websocket)
 
 		// conn0 owns subA, conn1 owns subB. A logical sub "C" whose inverse
-
 		// lives on conn1 must be tracked on conn1, not conn0.
 
 		subA := &subscription.Subscription{Channel: "A"}
@@ -2741,29 +2313,21 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		var trackedOnConn Connection
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				Connector: func(context.Context, Connection) error {
-
 					return errors.New("should not create a new connection")
-
 				},
 
 				TrackOnExistingConnection: func(_ context.Context, conn Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 					// Only track when the connection owns subB (the inverse).
 
 					if conn.Subscriptions().Get(subB) == nil {
-
 						return subs, nil, nil
-
 					}
 
 					trackedOnConn = conn
 
 					return nil, subscription.List{logical}, nil
-
 				},
 			},
 
@@ -2791,11 +2355,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.Equal(t, 1, conn0.subscriptions.Len(), "conn0 should not gain the logical sub")
 
 		assert.Equal(t, 2, conn1.subscriptions.Len(), "conn1 should own both subB and logical")
-
 	})
 
 	t.Run("Track Before Generic Subscribe Prevents Misrouting", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2805,15 +2367,10 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		m.connections = make(map[Connection]*websocket)
 
 		// conn0 has subA and spare capacity (max=2, used=1).
-
 		// conn1 has subB (the inverse of logical sub C).
-
 		// Without the pre-subscribe tracking pass, the generic
-
 		// subscribeToConnection loop would route C to conn0 because
-
 		// it has capacity. The fix ensures absorbTrackedSubscriptions
-
 		// runs first, absorbing C onto conn1.
 
 		subA := &subscription.Subscription{Channel: "A"}
@@ -2833,29 +2390,20 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		var trackedOnConn Connection
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{
-
 				Subscriber: func(_ context.Context, c Connection, s subscription.List) error {
-
 					return m.AddSuccessfulSubscriptions(c, s...)
-
 				},
 
 				Connector: func(context.Context, Connection) error {
-
 					return errors.New("should not create a new connection")
-
 				},
 
 				TrackOnExistingConnection: func(_ context.Context, conn Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 					// Only track when the connection owns subB (the inverse).
 
 					if conn.Subscriptions().Get(subB) == nil {
-
 						return subs, nil, nil
-
 					}
 
 					var remaining subscription.List
@@ -2863,23 +2411,18 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 					var tracked subscription.List
 
 					for _, s := range subs {
-
 						if s.Channel != logical.Channel {
-
 							remaining = append(remaining, s)
 
 							continue
-
 						}
 
 						trackedOnConn = conn
 
 						tracked = append(tracked, s)
-
 					}
 
 					return remaining, tracked, nil
-
 				},
 
 				Handler: func(context.Context, Connection, []byte) error { return nil },
@@ -2909,11 +2452,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.Equal(t, 1, conn0.subscriptions.Len(), "conn0 should not gain the logical sub")
 
 		assert.Equal(t, 2, conn1.subscriptions.Len(), "conn1 should own both subB and logical")
-
 	})
 
 	t.Run("Cleanup Removes Empty Connections", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2923,7 +2464,6 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		m.connections = make(map[Connection]*websocket)
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{},
 
 			subscriptions: subscription.NewStore(),
@@ -2954,11 +2494,9 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.Len(t, ws.connections, 1)
 
 		assert.Same(t, activeConn, ws.connections[0])
-
 	})
 
 	t.Run("Cleanup Keeps Freshly Added Connections", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -2968,7 +2506,6 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		m.connections = make(map[Connection]*websocket)
 
 		ws := &websocket{
-
 			setup: &ConnectionSetup{},
 
 			subscriptions: subscription.NewStore(),
@@ -2987,9 +2524,7 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		var addFreshOnce sync.Once
 
 		emptyConn.subscriptionsHook = func() {
-
 			addFreshOnce.Do(func() {
-
 				m.connectionManagerMu.Lock()
 
 				m.connections[freshConn] = ws
@@ -2997,9 +2532,7 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 				ws.connections = append(ws.connections, freshConn)
 
 				m.connectionManagerMu.Unlock()
-
 			})
-
 		}
 
 		ws.connections = []Connection{emptyConn, activeConn}
@@ -3021,19 +2554,13 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		var haveActive, haveFresh bool
 
 		for _, conn := range ws.connections {
-
 			if conn == activeConn {
-
 				haveActive = true
-
 			}
 
 			if conn == freshConn {
-
 				haveFresh = true
-
 			}
-
 		}
 
 		assert.True(t, haveActive)
@@ -3043,13 +2570,10 @@ func TestScaleConnectionsToSubscriptions(t *testing.T) {
 		assert.NotContains(t, m.connections, emptyConn)
 
 		assert.Same(t, ws, m.connections[freshConn])
-
 	})
-
 }
 
 func TestConnectTracksOnExistingConnectionBeforeNewConnection(t *testing.T) {
-
 	t.Parallel()
 
 	m := NewManager()
@@ -3065,9 +2589,7 @@ func TestConnectTracksOnExistingConnectionBeforeNewConnection(t *testing.T) {
 	m.setEnabled(true)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		mockws.WsMockUpgrader(t, w, r, mockws.EchoHandler)
-
 	}))
 
 	t.Cleanup(srv.Close)
@@ -3083,41 +2605,30 @@ func TestConnectTracksOnExistingConnectionBeforeNewConnection(t *testing.T) {
 	var trackCalls int
 
 	require.NoError(t, m.SetupNewConnection(&ConnectionSetup{
-
 		URL: "ws" + srv.URL[len("http"):] + "/ws",
 
 		Connector: func(ctx context.Context, conn Connection) error {
-
 			connectorCalls++
 
 			return conn.Dial(ctx, gws.DefaultDialer, nil, nil)
-
 		},
 
 		GenerateSubscriptions: func() (subscription.List, error) {
-
 			return subscription.List{subA, subB}, nil
-
 		},
 
 		Subscriber: func(_ context.Context, c Connection, s subscription.List) error {
-
 			return m.AddSuccessfulSubscriptions(c, s...)
-
 		},
 
 		TrackOnExistingConnection: func(_ context.Context, _ Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 			if len(subs) != 1 || subs[0] != subB {
-
 				return subs, nil, nil
-
 			}
 
 			trackCalls++
 
 			return nil, subscription.List{subB}, nil
-
 		},
 
 		Handler: func(context.Context, Connection, []byte) error { return nil },
@@ -3134,11 +2645,9 @@ func TestConnectTracksOnExistingConnectionBeforeNewConnection(t *testing.T) {
 	assert.NotNil(t, m.connectionManager[0].subscriptions.Get(subA), "first subscription should be tracked logically")
 
 	assert.NotNil(t, m.connectionManager[0].subscriptions.Get(subB), "later tracked subscription should be tracked logically")
-
 }
 
 func TestConnectReducesTrackedSubscriptionsBeforeBatching(t *testing.T) {
-
 	t.Parallel()
 
 	m := NewManager()
@@ -3154,9 +2663,7 @@ func TestConnectReducesTrackedSubscriptionsBeforeBatching(t *testing.T) {
 	m.setEnabled(true)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		mockws.WsMockUpgrader(t, w, r, mockws.EchoHandler)
-
 	}))
 
 	t.Cleanup(srv.Close)
@@ -3172,7 +2679,6 @@ func TestConnectReducesTrackedSubscriptionsBeforeBatching(t *testing.T) {
 	trackedB := &subscription.Subscription{Channel: "tracked-B"}
 
 	trackable := map[*subscription.Subscription]bool{
-
 		trackedA: true,
 
 		trackedB: true,
@@ -3183,31 +2689,23 @@ func TestConnectReducesTrackedSubscriptionsBeforeBatching(t *testing.T) {
 	var trackBatchLens []int
 
 	require.NoError(t, m.SetupNewConnection(&ConnectionSetup{
-
 		URL: "ws" + srv.URL[len("http"):] + "/ws",
 
 		Connector: func(ctx context.Context, conn Connection) error {
-
 			connectorCalls++
 
 			return conn.Dial(ctx, gws.DefaultDialer, nil, nil)
-
 		},
 
 		GenerateSubscriptions: func() (subscription.List, error) {
-
 			return subscription.List{realA, trackedA, realB, trackedB}, nil
-
 		},
 
 		Subscriber: func(_ context.Context, c Connection, s subscription.List) error {
-
 			return m.AddSuccessfulSubscriptions(c, s...)
-
 		},
 
 		TrackOnExistingConnection: func(_ context.Context, _ Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 			trackBatchLens = append(trackBatchLens, len(subs))
 
 			remaining := make(subscription.List, 0, len(subs))
@@ -3215,27 +2713,20 @@ func TestConnectReducesTrackedSubscriptionsBeforeBatching(t *testing.T) {
 			tracked := make(subscription.List, 0, len(subs))
 
 			for _, sub := range subs {
-
 				if !trackable[sub] {
-
 					remaining = append(remaining, sub)
 
 					continue
-
 				}
 
 				tracked = append(tracked, sub)
-
 			}
 
 			if len(tracked) == 0 {
-
 				return subs, nil, nil
-
 			}
 
 			return remaining, tracked, nil
-
 		},
 
 		Handler: func(context.Context, Connection, []byte) error { return nil },
@@ -3260,11 +2751,9 @@ func TestConnectReducesTrackedSubscriptionsBeforeBatching(t *testing.T) {
 	assert.NotNil(t, ws.subscriptions.Get(realA), "real-A is tracked logically")
 
 	assert.NotNil(t, ws.subscriptions.Get(realB), "real-B is tracked logically")
-
 }
 
 func TestConnectPreBatchTrackedSubscriptionsAutoRecordState(t *testing.T) {
-
 	t.Parallel()
 
 	m := NewManager()
@@ -3280,9 +2769,7 @@ func TestConnectPreBatchTrackedSubscriptionsAutoRecordState(t *testing.T) {
 	m.setEnabled(true)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		mockws.WsMockUpgrader(t, w, r, mockws.EchoHandler)
-
 	}))
 
 	t.Cleanup(srv.Close)
@@ -3294,49 +2781,36 @@ func TestConnectPreBatchTrackedSubscriptionsAutoRecordState(t *testing.T) {
 	trackedSub := &subscription.Subscription{Channel: "tracked"}
 
 	require.NoError(t, m.SetupNewConnection(&ConnectionSetup{
-
 		URL: "ws" + srv.URL[len("http"):] + "/ws",
 
 		Connector: func(ctx context.Context, conn Connection) error {
-
 			return conn.Dial(ctx, gws.DefaultDialer, nil, nil)
-
 		},
 
 		GenerateSubscriptions: func() (subscription.List, error) {
-
 			return subscription.List{realSub, trackedSub}, nil
-
 		},
 
 		Subscriber: func(_ context.Context, c Connection, s subscription.List) error {
-
 			return m.AddSuccessfulSubscriptions(c, s...)
-
 		},
 
 		TrackOnExistingConnection: func(_ context.Context, _ Connection, subs subscription.List) (subscription.List, subscription.List, error) {
-
 			remaining := make(subscription.List, 0, len(subs))
 
 			tracked := make(subscription.List, 0, len(subs))
 
 			for _, sub := range subs {
-
 				if sub == trackedSub {
-
 					tracked = append(tracked, sub)
 
 					continue
-
 				}
 
 				remaining = append(remaining, sub)
-
 			}
 
 			return remaining, tracked, nil
-
 		},
 
 		Handler: func(context.Context, Connection, []byte) error { return nil },
@@ -3349,15 +2823,12 @@ func TestConnectPreBatchTrackedSubscriptionsAutoRecordState(t *testing.T) {
 	require.NoError(t, m.Connect(t.Context()))
 
 	require.NotNil(t, ws.subscriptions.Get(trackedSub), "tracked subscriptions must be recorded by the manager")
-
 }
 
 func TestResubscribeFromConnection(t *testing.T) {
-
 	t.Parallel()
 
 	t.Run("Success", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3393,11 +2864,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.Contains(t, wsStore.List(), sub1, "sub1 must still be in websocket store")
 
 		require.Contains(t, connStore.List(), sub1, "sub1 must still be in connection store")
-
 	})
 
 	t.Run("NilConnection", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3405,11 +2874,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		err := m.ResubscribeFromConnection(t.Context(), nil, nil)
 
 		require.ErrorIs(t, err, common.ErrNilPointer)
-
 	})
 
 	t.Run("Bad state", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3435,11 +2902,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub1})
 
 		require.NoError(t, err, "an interrupted recovery must be retryable")
-
 	})
 
 	t.Run("Bad unsub", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3463,11 +2928,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub1})
 
 		require.ErrorIs(t, err, errAlreadyConnected, "must error")
-
 	})
 
 	t.Run("Bad sub", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3491,11 +2954,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub1})
 
 		require.ErrorIs(t, err, errAlreadyConnected, "must error")
-
 	})
 
 	t.Run("Retry after transient subscribe failure", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3515,25 +2976,19 @@ func TestResubscribeFromConnection(t *testing.T) {
 		conn := &connection{subscriptions: connStore}
 
 		m.Unsubscriber = func(subs subscription.List) error {
-
 			return m.RemoveSubscriptions(conn, subs...)
-
 		}
 
 		subscribeCalls := 0
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			subscribeCalls++
 
 			if subscribeCalls == 1 {
-
 				return errAlreadyConnected
-
 			}
 
 			return m.AddSuccessfulSubscriptions(conn, subs...)
-
 		}
 
 		require.ErrorIs(t, m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub}), errAlreadyConnected)
@@ -3553,11 +3008,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.Contains(t, connStore.List(), sub)
 
 		require.Same(t, sub, wsStore.Get(sub))
-
 	})
 
 	t.Run("Missing connection subscription", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3575,11 +3028,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		subscriberCalled := false
 
 		m.Subscriber = func(subscription.List) error {
-
 			subscriberCalled = true
 
 			return nil
-
 		}
 
 		err := m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub})
@@ -3587,11 +3038,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.ErrorIs(t, err, ErrSubscriptionsNotRemoved, "must error when the subscription is not owned by the connection")
 
 		assert.False(t, subscriberCalled, "subscriber should not be called for a subscription owned by another connection")
-
 	})
 
 	t.Run("Capacity consumed during unsubscribe", func(t *testing.T) {
-
 		t.Parallel()
 
 		m := NewManager()
@@ -3611,19 +3060,15 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.NoError(t, connStore.Add(sub), "subscription must be added to the connection store")
 
 		m.Unsubscriber = func(subscription.List) error {
-
 			return connStore.Add(other)
-
 		}
 
 		subscriberCalled := false
 
 		m.Subscriber = func(subscription.List) error {
-
 			subscriberCalled = true
 
 			return nil
-
 		}
 
 		conn := &connection{subscriptions: connStore}
@@ -3633,11 +3078,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.ErrorIs(t, err, ErrSubscriptionsNotAdded, "must error when connection capacity is consumed during resubscription")
 
 		assert.False(t, subscriberCalled, "subscriber should not be called when the connection has no capacity")
-
 	})
 
 	t.Run("Concurrent recovery coalesced", func(t *testing.T) {
-
 		m := NewManager()
 
 		wsStore := subscription.NewStore()
@@ -3665,25 +3108,19 @@ func TestResubscribeFromConnection(t *testing.T) {
 		unsubCalls := 0
 
 		m.Unsubscriber = func(subscription.List) error {
-
 			unsubCalls++
 
 			if unsubCalls == 1 {
-
 				close(firstUnsub)
 
 				<-releaseFirst
-
 			}
 
 			return nil
-
 		}
 
 		m.Subscriber = func(subs subscription.List) error {
-
 			return m.AddSuccessfulSubscriptions(conn, subs...)
-
 		}
 
 		var firstErr, secondErr error
@@ -3693,11 +3130,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		wg.Add(2)
 
 		go func() {
-
 			defer wg.Done()
 
 			firstErr = m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub})
-
 		}()
 
 		<-firstUnsub
@@ -3705,21 +3140,15 @@ func TestResubscribeFromConnection(t *testing.T) {
 		var signalSecondPreLock sync.Once
 
 		m.resubscribePreLockHook = func(s *subscription.Subscription) {
-
 			if s == sub {
-
 				signalSecondPreLock.Do(func() { close(secondPreLock) })
-
 			}
-
 		}
 
 		go func() {
-
 			defer wg.Done()
 
 			secondErr = m.ResubscribeFromConnection(t.Context(), conn, subscription.List{sub})
-
 		}()
 
 		<-secondPreLock
@@ -3735,11 +3164,9 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.Equal(t, 1, unsubCalls)
 
 		require.Equal(t, subscription.SubscribedState, sub.State())
-
 	})
 
 	t.Run("Connection capacity discount is per subscription pointer", func(t *testing.T) {
-
 		t.Parallel()
 
 		store := subscription.NewStore()
@@ -3759,13 +3186,10 @@ func TestResubscribeFromConnection(t *testing.T) {
 		require.NoError(t, store.Add(other))
 
 		require.Equal(t, 1, connectionUsedCapacity(store, subscription.List{sub}))
-
 	})
-
 }
 
 func TestUnsubscribeFromConnection(t *testing.T) {
-
 	t.Parallel()
 
 	m := NewManager()
@@ -3799,9 +3223,7 @@ func TestUnsubscribeFromConnection(t *testing.T) {
 	require.NoError(t, m.subscriptions.Add(sub1))
 
 	m.Unsubscriber = func(subscription.List) error {
-
 		return errors.New("unsub failed")
-
 	}
 
 	_, err = m.unsubscribeFromConnection(t.Context(), &connection{subscriptions: store}, subs)
@@ -3825,11 +3247,9 @@ func TestUnsubscribeFromConnection(t *testing.T) {
 	assert.Len(t, remaining, 1)
 
 	assert.Equal(t, "sub2", remaining[0].Channel)
-
 }
 
 func TestSubscribeToConnection(t *testing.T) {
-
 	t.Parallel()
 
 	m := NewManager()
@@ -3895,7 +3315,6 @@ func TestSubscribeToConnection(t *testing.T) {
 	m.MaxSubscriptionsPerConnection = 3
 
 	// subs has 3 items. Capacity is 3. Used is 1. Available is 2.
-
 	// Should subscribe to sub1, sub2. Return sub3.
 
 	remaining, err = m.subscribeToConnection(t.Context(), &connection{subscriptions: store}, subs)
@@ -3969,5 +3388,4 @@ func TestSubscribeToConnection(t *testing.T) {
 	_, err = m.subscribeToConnection(t.Context(), &connection{subscriptions: store}, subs)
 
 	require.NoError(t, err, "must not error when all subscriptions can be added, this exercises the path where available > len(subs)")
-
 }
