@@ -158,7 +158,7 @@ type Manager struct {
 
 	resubscriptionsMu sync.Mutex
 
-	resubscriptions map[*subscription.Subscription]struct{}
+	resubscriptions map[*subscription.Subscription]chan struct{}
 
 	resubscribePreLockHook func(*subscription.Subscription)
 
@@ -319,7 +319,7 @@ func NewManager() *Manager {
 
 		connections: make(map[Connection]*websocket),
 
-		resubscriptions: make(map[*subscription.Subscription]struct{}),
+		resubscriptions: make(map[*subscription.Subscription]chan struct{}),
 	}
 
 }

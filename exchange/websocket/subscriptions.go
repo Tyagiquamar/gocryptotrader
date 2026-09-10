@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"slices"
 
 	"github.com/thrasher-corp/gocryptotrader/common"
@@ -180,15 +179,17 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 
 	if m.resubscriptions == nil {
 
-		m.resubscriptions = make(map[*subscription.Subscription]struct{})
+		m.resubscriptions = make(map[*subscription.Subscription]chan struct{})
 
 	}
 
-	_, inFlight := m.resubscriptions[s]
+	ch, inFlight := m.resubscriptions[s]
 
 	if !inFlight {
 
-		m.resubscriptions[s] = struct{}{}
+		ch = make(chan struct{})
+
+		m.resubscriptions[s] = ch
 
 	}
 
@@ -200,7 +201,13 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 
 			m.resubscriptionsMu.Lock()
 
-			delete(m.resubscriptions, s)
+			if currentCh, ok := m.resubscriptions[s]; ok && currentCh == ch {
+
+				delete(m.resubscriptions, s)
+
+				close(ch)
+
+			}
 
 			m.resubscriptionsMu.Unlock()
 
@@ -234,7 +241,9 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 
 		m.resubscriptionsMu.Lock()
 
-		m.resubscriptions[s] = struct{}{}
+		ch = make(chan struct{})
+
+		m.resubscriptions[s] = ch
 
 		m.resubscriptionsMu.Unlock()
 
@@ -242,7 +251,13 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 
 			m.resubscriptionsMu.Lock()
 
-			delete(m.resubscriptions, s)
+			if currentCh, ok := m.resubscriptions[s]; ok && currentCh == ch {
+
+				delete(m.resubscriptions, s)
+
+				close(ch)
+
+			}
 
 			m.resubscriptionsMu.Unlock()
 
@@ -346,23 +361,19 @@ func restoreFailedRecovery(wsStore, connStore *subscription.Store, sub *subscrip
 
 func (m *Manager) waitForResubscriptionLeader(s *subscription.Subscription) {
 
-	for {
+	m.resubscriptionsMu.Lock()
 
-		m.resubscriptionsMu.Lock()
+	ch, exists := m.resubscriptions[s]
 
-		_, exists := m.resubscriptions[s]
+	m.resubscriptionsMu.Unlock()
 
-		m.resubscriptionsMu.Unlock()
+	if !exists {
 
-		if !exists {
-
-			return
-
-		}
-
-		runtime.Gosched()
+		return
 
 	}
+
+	<-ch
 
 }
 
@@ -1322,7 +1333,7 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 	if m.resubscriptions == nil {
 
-		m.resubscriptions = make(map[*subscription.Subscription]struct{})
+		m.resubscriptions = make(map[*subscription.Subscription]chan struct{})
 
 	}
 
@@ -1340,11 +1351,17 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 	}
 
+	chans := make([]chan struct{}, 0, len(subs))
+
 	if !allInFlight {
 
 		for _, s := range subs {
 
-			m.resubscriptions[s] = struct{}{}
+			ch := make(chan struct{})
+
+			m.resubscriptions[s] = ch
+
+			chans = append(chans, ch)
 
 		}
 
@@ -1358,9 +1375,15 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 			m.resubscriptionsMu.Lock()
 
-			for _, s := range subs {
+			for idx, s := range subs {
 
-				delete(m.resubscriptions, s)
+				if currentCh, ok := m.resubscriptions[s]; ok && currentCh == chans[idx] {
+
+					delete(m.resubscriptions, s)
+
+					close(chans[idx])
+
+				}
 
 			}
 
@@ -1400,9 +1423,15 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 		m.resubscriptionsMu.Lock()
 
+		chans = make([]chan struct{}, 0, len(subs))
+
 		for _, s := range subs {
 
-			m.resubscriptions[s] = struct{}{}
+			ch := make(chan struct{})
+
+			m.resubscriptions[s] = ch
+
+			chans = append(chans, ch)
 
 		}
 
@@ -1412,9 +1441,15 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 			m.resubscriptionsMu.Lock()
 
-			for _, s := range subs {
+			for idx, s := range subs {
 
-				delete(m.resubscriptions, s)
+				if currentCh, ok := m.resubscriptions[s]; ok && currentCh == chans[idx] {
+
+					delete(m.resubscriptions, s)
+
+					close(chans[idx])
+
+				}
 
 			}
 
