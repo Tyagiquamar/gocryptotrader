@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/thrasher-corp/gocryptotrader/common"
@@ -238,9 +239,13 @@ type recoverySnapshot struct {
 }
 
 func connectionSubscriptionStore(conn Connection) *subscription.Store {
-	if conn == nil {
+	if conn == nil || (reflect.ValueOf(conn).Kind() == reflect.Pointer && reflect.ValueOf(conn).IsNil()) {
 		return nil
 	}
+
+	defer func() {
+		_ = recover()
+	}()
 
 	return conn.Subscriptions()
 }
