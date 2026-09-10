@@ -265,7 +265,7 @@ func TestStoreDiff(t *testing.T) {
 
 	EqualLists(t, unsubs, List{{Channel: OrderbookChannel}, {Channel: CandlesChannel}})
 
-	t.Run("ResubscribingState treated as needing subscribe", func(t *testing.T) {
+	t.Run("same pointer in ResubscribingState is not a new add", func(t *testing.T) {
 		t.Parallel()
 
 		s := NewStore()
@@ -278,9 +278,29 @@ func TestStoreDiff(t *testing.T) {
 
 		added, removed := s.Diff(List{resub})
 
-		assert.Equal(t, List{resub}, added, "resubscribing entry should be treated as absent for subscribe diff")
+		assert.Empty(t, added, "the same resubscribing pointer is already in the store")
 
 		assert.Empty(t, removed, "still-wanted resubscribing entry should not be removed")
+	})
+
+	t.Run("same-key different pointer in ResubscribingState is added", func(t *testing.T) {
+		t.Parallel()
+
+		s := NewStore()
+
+		existing := &Subscription{Channel: TickerChannel}
+
+		require.NoError(t, s.Add(existing))
+
+		require.NoError(t, existing.SetState(ResubscribingState))
+
+		incoming := &Subscription{Channel: TickerChannel}
+
+		added, removed := s.Diff(List{incoming})
+
+		assert.Equal(t, List{incoming}, added, "FlushChannels generates a new pointer that must be subscribed")
+
+		assert.Empty(t, removed, "existing same-key entry must not be removed")
 	})
 }
 

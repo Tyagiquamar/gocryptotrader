@@ -273,16 +273,10 @@ func TestResubscribe(t *testing.T) {
 		m.Unsubscriber = func(subscription.List) error {
 			unsubscribes++
 
-			switch unsubscribes {
-			case 1:
-
+			if unsubscribes == 1 {
 				close(firstUnsubscribe)
 
 				<-releaseFirst
-
-			case 2:
-
-				close(secondUnsubscribe)
 			}
 
 			return nil
@@ -308,7 +302,7 @@ func TestResubscribe(t *testing.T) {
 
 		var signalSecond sync.Once
 
-		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+		m.resubscribeWaiterHook = func(s *subscription.Subscription) {
 			if s == sub {
 				signalSecond.Do(func() { close(secondUnsubscribe) })
 			}
@@ -676,7 +670,7 @@ func TestResubscribe(t *testing.T) {
 
 		var signalWaiter sync.Once
 
-		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+		m.resubscribeWaiterHook = func(s *subscription.Subscription) {
 			if s == sub {
 				signalWaiter.Do(func() { close(waiterPreLock) })
 			}
@@ -701,6 +695,80 @@ func TestResubscribe(t *testing.T) {
 		require.Equal(t, 2, calls)
 
 		require.Equal(t, subscription.SubscribedState, sub.State())
+	})
+
+	t.Run("Many coalesced waiters complete when leader finishes", func(t *testing.T) {
+		m := NewManager()
+
+		require.NoError(t, m.Setup(newDefaultSetup()))
+
+		sub := &subscription.Subscription{Channel: "manyWaiters"}
+
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+
+		m.Unsubscriber = func(subscription.List) error { return nil }
+
+		started := make(chan struct{})
+
+		release := make(chan struct{})
+
+		var startOnce sync.Once
+
+		m.Subscriber = func(subs subscription.List) error {
+			startOnce.Do(func() { close(started) })
+
+			<-release
+
+			return m.AddSuccessfulSubscriptions(nil, subs...)
+		}
+
+		const waiters = 23
+
+		errs := make(chan error, waiters+1)
+
+		go func() {
+			errs <- m.ResubscribeToChannel(t.Context(), nil, sub)
+		}()
+
+		<-started
+
+		var wg sync.WaitGroup
+
+		wg.Add(waiters)
+
+		for i := 0; i < waiters; i++ {
+			go func() {
+				defer wg.Done()
+
+				errs <- m.ResubscribeToChannel(t.Context(), nil, sub)
+			}()
+		}
+
+		close(release)
+
+		require.NoError(t, <-errs, "leader recovery must complete")
+
+		done := make(chan struct{})
+
+		go func() {
+			wg.Wait()
+
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("coalesced waiters did not return after leader closed")
+		}
+
+		close(errs)
+
+		for err := range errs {
+			require.NoError(t, err)
+		}
+
+		require.Empty(t, m.resubscriptions)
 	})
 
 	t.Run("Sibling channel subscription does not block recovery restore", func(t *testing.T) {
@@ -774,8 +842,10 @@ func TestResubscribe(t *testing.T) {
 
 		require.Same(t, sub, m.GetSubscription(sub))
 
+		incoming := &subscription.Subscription{Channel: "flushAfterFailTest"}
+
 		m.GenerateSubs = func() (subscription.List, error) {
-			return subscription.List{sub}, nil
+			return subscription.List{incoming}, nil
 		}
 
 		require.NoError(t, m.FlushChannels(t.Context()))
@@ -3139,7 +3209,7 @@ func TestResubscribeFromConnection(t *testing.T) {
 
 		var signalSecondPreLock sync.Once
 
-		m.resubscribePreLockHook = func(s *subscription.Subscription) {
+		m.resubscribeWaiterHook = func(s *subscription.Subscription) {
 			if s == sub {
 				signalSecondPreLock.Do(func() { close(secondPreLock) })
 			}

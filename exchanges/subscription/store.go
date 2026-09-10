@@ -227,7 +227,7 @@ func (s *Store) Diff(compare List) (added, removed List) {
 		found := s.get(sub)
 
 		if found != nil {
-			if found.State() == ResubscribingState {
+			if found.State() == ResubscribingState && found != sub {
 				added = append(added, sub)
 			}
 

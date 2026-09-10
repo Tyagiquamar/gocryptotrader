@@ -158,6 +158,8 @@ type Manager struct {
 
 	resubscribePreLockHook func(*subscription.Subscription)
 
+	resubscribeWaiterHook func(*subscription.Subscription)
+
 	connector func() error
 
 	rateLimitDefinitions request.RateLimitDefinitions // rate limiters shared between Websocket and REST connections
