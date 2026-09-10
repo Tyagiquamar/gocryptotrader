@@ -3420,34 +3420,28 @@ func TestResubscribeToChannel_ConcurrentCoalescing(t *testing.T) {
 	var wg sync.WaitGroup
 	var ownerErr, waiterErr error
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		ownerErr = m.ResubscribeToChannel(t.Context(), nil, sub1)
-	}()
+	})
 
 	<-ownerStarted
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		waiterErr = m.ResubscribeToChannel(t.Context(), nil, sub1)
-	}()
+	})
 
 	// Unrelated subscription recovery should proceed independently
 	var unrelatedErr error
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		unrelatedErr = m.ResubscribeToChannel(t.Context(), nil, sub2)
-	}()
+	})
 
 	close(ownerBlock)
 	wg.Wait()
 
-	require.ErrorIs(t, ownerErr, expectedErr, "Owner should receive the subscription error")
-	require.ErrorIs(t, waiterErr, expectedErr, "Waiter should receive the exact same error as owner")
-	require.NoError(t, unrelatedErr, "Unrelated subscription should recover independently without error")
+	require.ErrorIs(t, ownerErr, expectedErr, "Owner receives the subscription error")
+	require.ErrorIs(t, waiterErr, expectedErr, "Waiter receives the exact same error as owner")
+	require.NoError(t, unrelatedErr, "Unrelated subscription recovers independently without error")
 
 	m.resubscriptionsMu.Lock()
 	require.Empty(t, m.resubscriptions, "In-flight resubscriptions map must be empty after completion")
@@ -3510,7 +3504,7 @@ func TestBitfinex_ReplacementRegistrationBeforeError(t *testing.T) {
 	newSub := &subscription.Subscription{Channel: "ticker", Key: 43}
 
 	m.Unsubscriber = func(_ subscription.List) error { return nil }
-	m.Subscriber = func(l subscription.List) error {
+	m.Subscriber = func(_ subscription.List) error {
 		// Simulate Bitfinex async acknowledgement registering replacement chanID 43 before error
 		require.NoError(t, m.AddSuccessfulSubscriptions(nil, newSub))
 		return errors.New("timeout after handleWSSubscribed")
@@ -3548,4 +3542,3 @@ func TestFlushChannels_ResubscribingState(t *testing.T) {
 
 	require.NoError(t, m.FlushChannels(t.Context()), "FlushChannels must succeed when subscriptions are in ResubscribingState")
 }
-
