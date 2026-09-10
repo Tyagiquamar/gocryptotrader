@@ -119,6 +119,11 @@ func (m *Manager) initSubscriptionStore(conn Connection) *subscription.Store {
 	return m.subscriptions
 }
 
+type resubscribeTracker struct {
+	done chan struct{}
+	err  error
+}
+
 // ResubscribeToChannel resubscribes to channel
 // Sets state to Resubscribing, and exchanges which want to maintain a lock on it can respect this state and not RemoveSubscription.
 // A subscription already in ResubscribingState is retried.
@@ -130,72 +135,48 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 	m.resubscriptionsMu.Lock()
 
 	if m.resubscriptions == nil {
-		m.resubscriptions = make(map[*subscription.Subscription]chan struct{})
+		m.resubscriptions = make(map[*subscription.Subscription]*resubscribeTracker)
 	}
 
-	ch, inFlight := m.resubscriptions[s]
+	tracker, inFlight := m.resubscriptions[s]
 
 	if !inFlight {
-		ch = make(chan struct{})
+		tracker = &resubscribeTracker{
+			done: make(chan struct{}),
+		}
 
-		m.resubscriptions[s] = ch
+		m.resubscriptions[s] = tracker
 	}
 
 	m.resubscriptionsMu.Unlock()
 
-	if !inFlight {
-		defer func() {
-			m.resubscriptionsMu.Lock()
+	if inFlight {
+		<-tracker.done
 
-			if currentCh, ok := m.resubscriptions[s]; ok && currentCh == ch {
-				delete(m.resubscriptions, s)
-
-				close(ch)
-			}
-
-			m.resubscriptionsMu.Unlock()
-		}()
+		return tracker.err
 	}
+
+	var resErr error
+
+	defer func() {
+		m.resubscriptionsMu.Lock()
+
+		tracker.err = resErr
+
+		if currentTracker, ok := m.resubscriptions[s]; ok && currentTracker == tracker {
+			delete(m.resubscriptions, s)
+
+			close(tracker.done)
+		}
+
+		m.resubscriptionsMu.Unlock()
+	}()
 
 	if m.resubscribePreLockHook != nil {
 		m.resubscribePreLockHook(s)
 	}
 
 	m.m.Lock()
-
-	if inFlight {
-		m.m.Unlock()
-
-		m.waitForResubscriptionLeader(s)
-
-		m.m.Lock()
-
-		if s.State() == subscription.SubscribedState {
-			m.m.Unlock()
-
-			return nil
-		}
-
-		m.resubscriptionsMu.Lock()
-
-		ch = make(chan struct{})
-
-		m.resubscriptions[s] = ch
-
-		m.resubscriptionsMu.Unlock()
-
-		defer func() {
-			m.resubscriptionsMu.Lock()
-
-			if currentCh, ok := m.resubscriptions[s]; ok && currentCh == ch {
-				delete(m.resubscriptions, s)
-
-				close(ch)
-			}
-
-			m.resubscriptionsMu.Unlock()
-		}()
-	}
 
 	l := subscription.List{s}
 
@@ -216,6 +197,8 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 	m.m.Unlock()
 
 	if err := m.UnsubscribeChannels(ctx, conn, l); err != nil {
+		resErr = err
+
 		return err
 	}
 
@@ -225,6 +208,8 @@ func (m *Manager) ResubscribeToChannel(ctx context.Context, conn Connection, s *
 		restoreFailedRecovery(wsStore, connStore, s, origKey)
 
 		m.m.Unlock()
+
+		resErr = err
 
 		return err
 	}
@@ -243,10 +228,6 @@ func connectionSubscriptionStore(conn Connection) *subscription.Store {
 		return nil
 	}
 
-	defer func() {
-		_ = recover()
-	}()
-
 	return conn.Subscriptions()
 }
 
@@ -259,31 +240,9 @@ func restoreFailedRecovery(wsStore, connStore *subscription.Store, sub *subscrip
 		restoreSubscriptionAfterFailedRecovery(connStore, sub, origKey)
 	}
 
-	if wsStore == nil || wsStore == connStore {
-		return
-	}
-
-	if wsStore.Get(sub) == nil {
+	if wsStore != nil && wsStore != connStore {
 		restoreSubscriptionAfterFailedRecovery(wsStore, sub, origKey)
-
-		return
 	}
-
-	_ = sub.SetState(subscription.ResubscribingState)
-}
-
-func (m *Manager) waitForResubscriptionLeader(s *subscription.Subscription) {
-	m.resubscriptionsMu.Lock()
-
-	ch, exists := m.resubscriptions[s]
-
-	m.resubscriptionsMu.Unlock()
-
-	if !exists {
-		return
-	}
-
-	<-ch
 }
 
 func connectionUsedCapacity(store *subscription.Store, incoming subscription.List) int {
@@ -349,7 +308,11 @@ func restoreSubscriptionAfterFailedRecovery(store *subscription.Store, sub *subs
 
 	if hasLiveRecoveryReplacement(store, sub, origKey) {
 		if store.Get(sub) != nil {
-			_ = sub.SetState(subscription.ResubscribingState)
+			_ = store.Remove(sub)
+		}
+
+		if origKey != nil && store.Get(origKey) != nil {
+			_ = store.Remove(origKey)
 		}
 
 		return
@@ -437,10 +400,15 @@ func (m *Manager) AddSuccessfulSubscriptions(conn Connection, subs ...*subscript
 	var errs error
 
 	for _, s := range subs {
-		alreadyTracked := subscriptionStore.Get(s) != nil && s.State() == subscription.ResubscribingState
+		found := subscriptionStore.Get(s)
+		alreadyTracked := (found != nil && found.State() == subscription.ResubscribingState) || s.State() == subscription.ResubscribingState
 
 		if err := s.SetState(subscription.SubscribedState); err != nil {
 			errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
+		}
+
+		if found != nil && found != s {
+			_ = found.SetState(subscription.SubscribedState)
 		}
 
 		if !alreadyTracked {
@@ -595,6 +563,10 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 		}
 
 		if found := subscriptionStore.Get(s); found != nil {
+			if found.State() == subscription.ResubscribingState {
+				continue
+			}
+
 			return fmt.Errorf("%w: %s", subscription.ErrDuplicate, s)
 		}
 	}
@@ -934,7 +906,7 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 	m.resubscriptionsMu.Lock()
 
 	if m.resubscriptions == nil {
-		m.resubscriptions = make(map[*subscription.Subscription]chan struct{})
+		m.resubscriptions = make(map[*subscription.Subscription]*resubscribeTracker)
 	}
 
 	allInFlight := true
@@ -947,85 +919,71 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 		}
 	}
 
-	chans := make([]chan struct{}, 0, len(subs))
+	trackers := make([]*resubscribeTracker, 0, len(subs))
 
-	if !allInFlight {
+	if allInFlight {
 		for _, s := range subs {
-			ch := make(chan struct{})
+			if tracker, ok := m.resubscriptions[s]; ok {
+				trackers = append(trackers, tracker)
+			}
+		}
+	} else {
+		for _, s := range subs {
+			tracker := m.resubscriptions[s]
 
-			m.resubscriptions[s] = ch
+			if tracker == nil {
+				tracker = &resubscribeTracker{
+					done: make(chan struct{}),
+				}
 
-			chans = append(chans, ch)
+				m.resubscriptions[s] = tracker
+			}
+
+			trackers = append(trackers, tracker)
 		}
 	}
 
 	m.resubscriptionsMu.Unlock()
 
-	if !allInFlight {
-		defer func() {
-			m.resubscriptionsMu.Lock()
+	if allInFlight {
+		var firstErr error
 
-			for idx, s := range subs {
-				if currentCh, ok := m.resubscriptions[s]; ok && currentCh == chans[idx] {
-					delete(m.resubscriptions, s)
+		for _, tracker := range trackers {
+			<-tracker.done
 
-					close(chans[idx])
-				}
+			if tracker.err != nil && firstErr == nil {
+				firstErr = tracker.err
 			}
+		}
 
-			m.resubscriptionsMu.Unlock()
-		}()
+		return firstErr
 	}
+
+	var resErr error
+
+	defer func() {
+		m.resubscriptionsMu.Lock()
+
+		for idx, s := range subs {
+			tracker := trackers[idx]
+
+			tracker.err = resErr
+
+			if currentTracker, ok := m.resubscriptions[s]; ok && currentTracker == tracker {
+				delete(m.resubscriptions, s)
+
+				close(tracker.done)
+			}
+		}
+
+		m.resubscriptionsMu.Unlock()
+	}()
 
 	if m.resubscribePreLockHook != nil && len(subs) > 0 {
 		m.resubscribePreLockHook(subs[0])
 	}
 
 	m.m.Lock()
-
-	if allInFlight {
-		m.m.Unlock()
-
-		for _, s := range subs {
-			m.waitForResubscriptionLeader(s)
-		}
-
-		m.m.Lock()
-
-		if allSubscriptionsState(subs, subscription.SubscribedState) {
-			m.m.Unlock()
-
-			return nil
-		}
-
-		m.resubscriptionsMu.Lock()
-
-		chans = make([]chan struct{}, 0, len(subs))
-
-		for _, s := range subs {
-			ch := make(chan struct{})
-
-			m.resubscriptions[s] = ch
-
-			chans = append(chans, ch)
-		}
-
-		m.resubscriptionsMu.Unlock()
-
-		defer func() {
-			m.resubscriptionsMu.Lock()
-
-			for idx, s := range subs {
-				if currentCh, ok := m.resubscriptions[s]; ok && currentCh == chans[idx] {
-					delete(m.resubscriptions, s)
-
-					close(chans[idx])
-				}
-			}
-
-			m.resubscriptionsMu.Unlock()
-		}()
-	}
 
 	wsStore := m.subscriptionStore(conn)
 
@@ -1053,6 +1011,8 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 	missing, err := m.unsubscribeFromConnection(ctx, conn, subs)
 	if err != nil {
+		resErr = err
+
 		return err
 	}
 
@@ -1066,7 +1026,9 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 		}
 
 		if len(notRemoved) > 0 {
-			return fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, notRemoved)
+			resErr = fmt.Errorf("%w: %q", ErrSubscriptionsNotRemoved, notRemoved)
+
+			return resErr
 		}
 	}
 
@@ -1084,11 +1046,15 @@ func (m *Manager) ResubscribeFromConnection(ctx context.Context, conn Connection
 
 		m.m.Unlock()
 
+		resErr = err
+
 		return err
 	}
 
 	if len(remaining) > 0 {
-		return fmt.Errorf("%w: %q", ErrSubscriptionsNotAdded, remaining)
+		resErr = fmt.Errorf("%w: %q", ErrSubscriptionsNotAdded, remaining)
+
+		return resErr
 	}
 
 	return nil

@@ -3389,3 +3389,163 @@ func TestSubscribeToConnection(t *testing.T) {
 
 	require.NoError(t, err, "must not error when all subscriptions can be added, this exercises the path where available > len(subs)")
 }
+
+func TestResubscribeToChannel_ConcurrentCoalescing(t *testing.T) {
+	t.Parallel()
+
+	m := NewManager()
+	require.NoError(t, m.Setup(newDefaultSetup()))
+
+	sub1 := &subscription.Subscription{Channel: "ticker1", Key: "t1"}
+	sub2 := &subscription.Subscription{Channel: "ticker2", Key: "t2"}
+
+	require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub1, sub2))
+
+	expectedErr := errors.New("subscribe error failure")
+
+	ownerStarted := make(chan struct{})
+	ownerBlock := make(chan struct{})
+
+	var once sync.Once
+	m.Unsubscriber = func(_ subscription.List) error { return nil }
+	m.Subscriber = func(l subscription.List) error {
+		if len(l) > 0 && l[0] == sub1 {
+			once.Do(func() { close(ownerStarted) })
+			<-ownerBlock
+			return expectedErr
+		}
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	var ownerErr, waiterErr error
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ownerErr = m.ResubscribeToChannel(t.Context(), nil, sub1)
+	}()
+
+	<-ownerStarted
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		waiterErr = m.ResubscribeToChannel(t.Context(), nil, sub1)
+	}()
+
+	// Unrelated subscription recovery should proceed independently
+	var unrelatedErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		unrelatedErr = m.ResubscribeToChannel(t.Context(), nil, sub2)
+	}()
+
+	close(ownerBlock)
+	wg.Wait()
+
+	require.ErrorIs(t, ownerErr, expectedErr, "Owner should receive the subscription error")
+	require.ErrorIs(t, waiterErr, expectedErr, "Waiter should receive the exact same error as owner")
+	require.NoError(t, unrelatedErr, "Unrelated subscription should recover independently without error")
+
+	m.resubscriptionsMu.Lock()
+	require.Empty(t, m.resubscriptions, "In-flight resubscriptions map must be empty after completion")
+	m.resubscriptionsMu.Unlock()
+}
+
+func TestOKX_RecoveryRetryRetention(t *testing.T) {
+	t.Parallel()
+
+	m := NewManager()
+	require.NoError(t, m.Setup(newDefaultSetup()))
+
+	sub := &subscription.Subscription{Channel: "orders", Key: "okx_orders"}
+	connStore := subscription.NewStore()
+	mockConn := &connection{subscriptions: connStore}
+
+	require.NoError(t, m.AddSuccessfulSubscriptions(mockConn, sub))
+	require.NoError(t, connStore.Add(sub))
+
+	m.Unsubscriber = func(l subscription.List) error {
+		return m.RemoveSubscriptions(mockConn, l...)
+	}
+
+	subCount := 0
+	m.Subscriber = func(l subscription.List) error {
+		subCount++
+		if subCount == 1 {
+			return errors.New("transient subscribe failure")
+		}
+		return m.AddSuccessfulSubscriptions(mockConn, l...)
+	}
+
+	// First recovery attempt fails
+	err1 := m.ResubscribeToChannel(t.Context(), mockConn, sub)
+	require.ErrorContains(t, err1, "transient subscribe failure")
+
+	// Verify subscription remains in both stores and is in ResubscribingState
+	require.NotNil(t, m.GetSubscription(sub), "Websocket-level store must retain the subscription after failed recovery")
+	require.NotNil(t, connStore.Get(sub), "Connection-level store must retain the subscription after failed recovery")
+	require.Equal(t, subscription.ResubscribingState, sub.State(), "Subscription state must remain ResubscribingState for retry")
+
+	// Second recovery attempt succeeds
+	err2 := m.ResubscribeToChannel(t.Context(), mockConn, sub)
+	require.NoError(t, err2, "Second recovery attempt must succeed")
+
+	require.NotNil(t, m.GetSubscription(sub), "Websocket store must retain subscription after success")
+	require.NotNil(t, connStore.Get(sub), "Connection store must retain subscription after success")
+	require.Equal(t, subscription.SubscribedState, sub.State(), "Subscription state must be SubscribedState after recovery success")
+}
+
+func TestBitfinex_ReplacementRegistrationBeforeError(t *testing.T) {
+	t.Parallel()
+
+	m := NewManager()
+	require.NoError(t, m.Setup(newDefaultSetup()))
+
+	oldSub := &subscription.Subscription{Channel: "ticker", Key: 42}
+	require.NoError(t, m.AddSuccessfulSubscriptions(nil, oldSub))
+
+	newSub := &subscription.Subscription{Channel: "ticker", Key: 43}
+
+	m.Unsubscriber = func(_ subscription.List) error { return nil }
+	m.Subscriber = func(l subscription.List) error {
+		// Simulate Bitfinex async acknowledgement registering replacement chanID 43 before error
+		require.NoError(t, m.AddSuccessfulSubscriptions(nil, newSub))
+		return errors.New("timeout after handleWSSubscribed")
+	}
+
+	err := m.ResubscribeToChannel(t.Context(), nil, oldSub)
+	require.ErrorContains(t, err, "timeout after handleWSSubscribed")
+
+	// Stale channel ID 42 must NOT be present in the store
+	require.Nil(t, m.GetSubscription(42), "Stale channel ID 42 must not be resurrected or retained")
+	// Only replacement channel ID 43 should remain tracked
+	require.NotNil(t, m.GetSubscription(43), "Only replacement channel ID 43 must remain tracked")
+	require.Equal(t, subscription.SubscribedState, m.GetSubscription(43).State(), "Replacement subscription must be in SubscribedState")
+}
+
+func TestFlushChannels_ResubscribingState(t *testing.T) {
+	t.Parallel()
+
+	m := NewManager()
+	require.NoError(t, m.Setup(newDefaultSetup()))
+	m.state.Store(connectedState)
+
+	sub := &subscription.Subscription{Channel: "TestSub", Enabled: true}
+	m.GenerateSubs = func() (subscription.List, error) {
+		return subscription.List{sub.Clone()}, nil
+	}
+
+	require.NoError(t, m.AddSuccessfulSubscriptions(nil, sub))
+	_ = sub.SetState(subscription.ResubscribingState)
+
+	m.Unsubscriber = func(_ subscription.List) error { return nil }
+	m.Subscriber = func(l subscription.List) error {
+		return m.AddSuccessfulSubscriptions(nil, l...)
+	}
+
+	require.NoError(t, m.FlushChannels(t.Context()), "FlushChannels must succeed when subscriptions are in ResubscribingState")
+}
+
