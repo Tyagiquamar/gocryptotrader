@@ -100,8 +100,8 @@ type Manager struct {
 	subscriptions                 *subscription.Store
 	resubscriptionsMu             sync.Mutex
 	resubscriptions               map[*subscription.Subscription]*resubscribeTracker
-	resubscribePreLockHook        func(*subscription.Subscription)
-	resubscribeWaiterHook         func(*subscription.Subscription)
+	resubscribePreLockHook        func(*subscription.Subscription) // test-only, never set in production: signals a caller reached the pre-lock point
+	resubscribeWaiterHook         func(*subscription.Subscription) // test-only, never set in production: signals a caller coalesced onto an in-flight recovery
 	connector                     func() error
 	rateLimitDefinitions          request.RateLimitDefinitions // rate limiters shared between Websocket and REST connections
 	Subscriber                    func(subscription.List) error

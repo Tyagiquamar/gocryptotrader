@@ -262,10 +262,11 @@ func restoreSubscriptionAfterFailedRecovery(store *subscription.Store, sub *subs
 		return
 	}
 	if hasLiveRecoveryReplacement(store, sub, origKey) {
-		if store.Get(sub) != nil {
+		// Get matches a default key by ExactKey and can return the replacement, so only remove the stale pointer itself
+		if store.Get(sub) == sub {
 			_ = store.Remove(sub)
 		}
-		if origKey != nil && store.Get(origKey) != nil {
+		if origKey != nil && store.Get(origKey) == sub {
 			_ = store.Remove(origKey)
 		}
 		return
@@ -276,6 +277,45 @@ func restoreSubscriptionAfterFailedRecovery(store *subscription.Store, sub *subs
 	_ = sub.SetState(subscription.ResubscribingState)
 	if store.Get(sub) == nil {
 		_ = store.Add(sub)
+	}
+}
+
+// dropFailedRecoveries removes subscriptions a failed recovery left in ResubscribingState, so a flush treats them as
+// absent and resubscribes them if they are still wanted. Exchanges read ResubscribingState as a recovery in flight,
+// so a restored entry must not outlive the next flush.
+func (m *Manager) dropFailedRecoveries() {
+	stores := []*subscription.Store{m.subscriptions}
+	for _, conn := range []Connection{m.Conn, m.AuthConn} {
+		if conn != nil {
+			stores = append(stores, conn.Subscriptions())
+		}
+	}
+	for _, ws := range m.snapshotConnectionManager() {
+		stores = append(stores, ws.subscriptions)
+		for _, conn := range m.snapshotManagedConnections(ws) {
+			stores = append(stores, conn.Subscriptions())
+		}
+	}
+	m.resubscriptionsMu.Lock()
+	defer m.resubscriptionsMu.Unlock()
+	failed := make(map[*subscription.Subscription]struct{})
+	for _, store := range stores {
+		if store == nil {
+			continue
+		}
+		for _, s := range store.List() {
+			if _, inFlight := m.resubscriptions[s]; !inFlight && s.State() == subscription.ResubscribingState {
+				failed[s] = struct{}{}
+			}
+		}
+	}
+	for s := range failed {
+		for _, store := range stores {
+			if store.Get(s) == s {
+				_ = store.Remove(s)
+			}
+		}
+		_ = s.SetState(subscription.UnsubscribedState)
 	}
 }
 
@@ -343,13 +383,9 @@ func (m *Manager) AddSuccessfulSubscriptions(conn Connection, subs ...*subscript
 
 	var errs error
 	for _, s := range subs {
-		found := subscriptionStore.Get(s)
-		alreadyTracked := found != nil && (found.State() == subscription.ResubscribingState || s.State() == subscription.ResubscribingState)
+		alreadyTracked := s.State() == subscription.ResubscribingState && subscriptionStore.Get(s) == s
 		if err := s.SetState(subscription.SubscribedState); err != nil {
 			errs = common.AppendError(errs, fmt.Errorf("%w: %s", err, s))
-		}
-		if found != nil && found != s {
-			_ = found.SetState(subscription.SubscribedState)
 		}
 		if !alreadyTracked {
 			if err := subscriptionStore.Add(s); err != nil {
@@ -456,13 +492,15 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 		}
 		connSubStore = subscriptionStore
 	}
-	usedCap := connectionUsedCapacity(connSubStore, subs)
-	if m.MaxSubscriptionsPerConnection > 0 && usedCap+len(subs) > m.MaxSubscriptionsPerConnection {
-		return fmt.Errorf("%w: current subscriptions: %v, incoming subscriptions: %v, max subscriptions per connection: %v",
-			errSubscriptionsExceedsLimit,
-			usedCap,
-			len(subs),
-			m.MaxSubscriptionsPerConnection)
+	if m.MaxSubscriptionsPerConnection > 0 {
+		usedCap := connectionUsedCapacity(connSubStore, subs)
+		if usedCap+len(subs) > m.MaxSubscriptionsPerConnection {
+			return fmt.Errorf("%w: current subscriptions: %v, incoming subscriptions: %v, max subscriptions per connection: %v",
+				errSubscriptionsExceedsLimit,
+				usedCap,
+				len(subs),
+				m.MaxSubscriptionsPerConnection)
+		}
 	}
 
 	for _, s := range subs {
@@ -470,9 +508,6 @@ func (m *Manager) checkSubscriptions(conn Connection, subs subscription.List) er
 			continue
 		}
 		if found := subscriptionStore.Get(s); found != nil {
-			if found.State() == subscription.ResubscribingState {
-				continue
-			}
 			return fmt.Errorf("%w: %s", subscription.ErrDuplicate, s)
 		}
 	}
@@ -504,6 +539,8 @@ func (m *Manager) flushChannels(ctx context.Context) error {
 		}
 		return m.connect(ctx)
 	}
+
+	m.dropFailedRecoveries()
 
 	if !m.useMultiConnectionManagement {
 		newSubs, err := m.GenerateSubs()
@@ -794,16 +831,14 @@ func (m *Manager) resubscribeFromConnection(ctx context.Context, conn Connection
 		}
 		return firstErr
 	}
-	subs = ownedSubs
+	// The subscriber is handed subs and may reorder it; ownedSubs stays paired with ownedTrackers
+	subs = slices.Clone(ownedSubs)
 	var resErr error
 	defer func() {
 		for idx, s := range ownedSubs {
 			finishResubscriptionTracker(m, s, ownedTrackers[idx], resErr)
 		}
 	}()
-	if m.resubscribePreLockHook != nil && len(subs) > 0 {
-		m.resubscribePreLockHook(subs[0])
-	}
 	m.m.Lock()
 	wsStore := m.subscriptionStore(conn)
 	connStore := connectionSubscriptionStore(conn)
@@ -887,9 +922,6 @@ func (m *Manager) unsubscribeFromConnection(ctx context.Context, conn Connection
 
 	missing := store.Missing(subs)
 	for _, r := range remove {
-		if r.State() == subscription.ResubscribingState {
-			continue
-		}
 		if store.Get(r) == nil {
 			continue
 		}
@@ -930,11 +962,6 @@ func (m *Manager) subscribeToConnection(ctx context.Context, conn Connection, su
 	}
 
 	for _, s := range toSubscribe {
-		if s.State() != subscription.SubscribedState {
-			if err := s.SetState(subscription.SubscribedState); err != nil {
-				return nil, err
-			}
-		}
 		if tracked[s] {
 			continue
 		}

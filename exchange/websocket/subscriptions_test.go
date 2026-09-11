@@ -453,9 +453,10 @@ func TestResubscribe(t *testing.T) {
 			return m.AddSuccessfulSubscriptions(nil, subs...)
 		}
 		const waiters = 23
-		errs := make(chan error, waiters+1)
+		leaderErr := make(chan error, 1)
+		errs := make(chan error, waiters)
 		go func() {
-			errs <- m.ResubscribeToChannel(t.Context(), nil, sub)
+			leaderErr <- m.ResubscribeToChannel(t.Context(), nil, sub)
 		}()
 		<-started
 		var wg sync.WaitGroup
@@ -467,7 +468,7 @@ func TestResubscribe(t *testing.T) {
 			}()
 		}
 		close(release)
-		require.NoError(t, <-errs, "leader recovery must complete")
+		require.NoError(t, <-leaderErr, "leader recovery must complete")
 		done := make(chan struct{})
 		go func() {
 			wg.Wait()
@@ -531,15 +532,16 @@ func TestResubscribe(t *testing.T) {
 			return subscription.List{incoming}, nil
 		}
 		require.NoError(t, m.FlushChannels(t.Context()))
-		require.Same(t, sub, m.GetSubscription(sub))
-		require.Equal(t, subscription.SubscribedState, sub.State())
+		tracked := m.GetSubscription(incoming)
+		require.NotNil(t, tracked, "flush must track the subscription again")
+		require.Equal(t, subscription.SubscribedState, tracked.State())
 		require.Equal(t, 2, subscribeCalls)
 		m.GenerateSubs = func() (subscription.List, error) {
 			return subscription.List{}, nil
 		}
 		require.NoError(t, m.FlushChannels(t.Context()))
 		require.Nil(t, m.GetSubscription(sub))
-		require.Equal(t, subscription.UnsubscribedState, sub.State())
+		require.Equal(t, subscription.UnsubscribedState, tracked.State())
 	})
 }
 
@@ -2383,9 +2385,22 @@ func TestResubscribeToChannel_ConcurrentCoalescing(t *testing.T) {
 		ownerErr = m.ResubscribeToChannel(t.Context(), nil, sub1)
 	})
 	<-ownerStarted
+	waiterParked := make(chan struct{})
+	var parkOnce sync.Once
+	m.resubscribeWaiterHook = func(s *subscription.Subscription) {
+		if s == sub1 {
+			parkOnce.Do(func() { close(waiterParked) })
+		}
+	}
 	wg.Go(func() {
 		waiterErr = m.ResubscribeToChannel(t.Context(), nil, sub1)
 	})
+	select {
+	case <-waiterParked:
+	case <-time.After(5 * time.Second):
+		close(ownerBlock)
+		require.FailNow(t, "second recovery must coalesce onto the first")
+	}
 	// Unrelated subscription recovery should proceed independently
 	var unrelatedErr error
 	wg.Go(func() {

@@ -192,8 +192,8 @@ func TestStoreDiff(t *testing.T) {
 		require.NoError(t, existing.SetState(ResubscribingState))
 		incoming := &Subscription{Channel: TickerChannel}
 		added, removed := s.Diff(List{incoming})
-		assert.Equal(t, List{incoming}, added, "FlushChannels should subscribe the newly generated pointer")
-		assert.Empty(t, removed, "existing same-key entry should not be removed")
+		assert.Empty(t, added, "the same-key entry is already in the store")
+		assert.Empty(t, removed, "still-wanted resubscribing entry should not be removed")
 	})
 }
 
