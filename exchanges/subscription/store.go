@@ -10,8 +10,7 @@ import (
 
 // Store is a container of subscription pointers
 type Store struct {
-	m map[any]*Subscription
-
+	m  map[any]*Subscription
 	mu sync.RWMutex
 }
 
@@ -25,17 +24,14 @@ func NewStore() *Store {
 // NewStoreFromList creates a Store from a List
 func NewStoreFromList(l List) (*Store, error) {
 	s := NewStore()
-
 	for _, sub := range l {
 		if sub == nil {
 			return nil, fmt.Errorf("%w: List parameter contains an nil element", common.ErrNilPointer)
 		}
-
 		if err := s.add(sub); err != nil {
 			return nil, err
 		}
 	}
-
 	return s, nil
 }
 
@@ -46,19 +42,14 @@ func (s *Store) Add(sub *Subscription) error {
 	if s == nil {
 		return fmt.Errorf("%w: Add called on nil Store", common.ErrNilPointer)
 	}
-
 	if s.m == nil {
 		return fmt.Errorf("%w: Add called on an uninitialised Store", common.ErrNilPointer)
 	}
-
 	if sub == nil {
 		return fmt.Errorf("%w: Subscription param", common.ErrNilPointer)
 	}
-
 	s.mu.Lock()
-
 	defer s.mu.Unlock()
-
 	return s.add(sub)
 }
 
@@ -67,13 +58,10 @@ func (s *Store) Add(sub *Subscription) error {
 // This method provides no locking protection
 func (s *Store) add(sub *Subscription) error {
 	key := sub.EnsureKeyed()
-
 	if found := s.get(key); found != nil {
 		return fmt.Errorf("%w: %s", ErrDuplicate, sub)
 	}
-
 	s.m[key] = sub
-
 	return nil
 }
 
@@ -82,7 +70,6 @@ func (s *Store) add(sub *Subscription) error {
 // This method provides no locking protection
 func (s *Store) unsafeAdd(sub *Subscription) {
 	key := sub.EnsureKeyed()
-
 	s.m[key] = sub
 }
 
@@ -93,11 +80,8 @@ func (s *Store) Get(key any) *Subscription {
 	if s == nil || s.m == nil || key == nil {
 		return nil
 	}
-
 	s.mu.RLock()
-
 	defer s.mu.RUnlock()
-
 	return s.get(key)
 }
 
@@ -108,21 +92,15 @@ func (s *Store) Get(key any) *Subscription {
 func (s *Store) get(key any) *Subscription {
 	switch v := key.(type) {
 	case Subscription:
-
 		key = v.EnsureKeyed()
-
 	case *Subscription:
-
 		key = v.EnsureKeyed()
 	}
 
 	switch v := key.(type) {
 	case MatchableKey:
-
 		return s.match(v)
-
 	default:
-
 		return s.m[v]
 	}
 }
@@ -134,22 +112,17 @@ func (s *Store) Remove(key any) error {
 	if s == nil {
 		return fmt.Errorf("%w: Remove called on nil Store", common.ErrNilPointer)
 	}
-
 	if s.m == nil {
 		return fmt.Errorf("%w: Remove called on an Uninitialised Store", common.ErrNilPointer)
 	}
-
 	if key == nil {
 		return fmt.Errorf("%w: key param", common.ErrNilPointer)
 	}
-
 	s.mu.Lock()
-
 	defer s.mu.Unlock()
 
 	if found := s.get(key); found != nil {
 		delete(s.m, found.Key)
-
 		return nil
 	}
 
@@ -161,17 +134,12 @@ func (s *Store) List() List {
 	if s == nil || s.m == nil {
 		return List{}
 	}
-
 	s.mu.RLock()
-
 	defer s.mu.RUnlock()
-
 	subs := make(List, 0, len(s.m))
-
 	for _, sub := range s.m {
 		subs = append(subs, sub)
 	}
-
 	return subs
 }
 
@@ -180,15 +148,11 @@ func (s *Store) Clear() {
 	if s == nil {
 		return
 	}
-
 	s.mu.Lock()
-
 	defer s.mu.Unlock()
-
 	if s.m == nil {
 		s.m = map[any]*Subscription{}
 	}
-
 	clear(s.m)
 }
 
@@ -205,7 +169,6 @@ func (s *Store) match(key MatchableKey) *Subscription {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -216,26 +179,18 @@ func (s *Store) Diff(compare List) (added, removed List) {
 	if s == nil || s.m == nil {
 		return added, removed
 	}
-
 	s.mu.RLock()
-
 	defer s.mu.RUnlock()
-
 	removedMap := maps.Clone(s.m)
-
 	for _, sub := range compare {
 		found := s.get(sub)
-
 		if found != nil {
 			if found.State() == ResubscribingState && found != sub {
 				added = append(added, sub)
 			}
-
 			delete(removedMap, found.Key)
-
 			continue
 		}
-
 		added = append(added, sub)
 	}
 
@@ -251,11 +206,8 @@ func (s *Store) Len() int {
 	if s == nil {
 		return 0
 	}
-
 	s.mu.RLock()
-
 	defer s.mu.RUnlock()
-
 	return len(s.m)
 }
 
@@ -264,17 +216,13 @@ func (s *Store) Contained(compare List) (matched List) {
 	if s == nil || s.m == nil {
 		return nil
 	}
-
 	s.mu.RLock()
-
 	defer s.mu.RUnlock()
-
 	for _, sub := range compare {
 		if found := s.get(sub); found != nil {
 			matched = append(matched, found)
 		}
 	}
-
 	return matched
 }
 
@@ -283,16 +231,12 @@ func (s *Store) Missing(compare List) (missing List) {
 	if s == nil || s.m == nil {
 		return compare // All are missing
 	}
-
 	s.mu.RLock()
-
 	defer s.mu.RUnlock()
-
 	for _, sub := range compare {
 		if found := s.get(sub); found == nil {
 			missing = append(missing, sub)
 		}
 	}
-
 	return missing
 }
